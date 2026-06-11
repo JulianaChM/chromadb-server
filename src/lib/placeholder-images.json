@@ -1,3 +1,22 @@
 {
-  "placeholderImages": []
+  "placeholderImages": [
+    {
+      "id": "hero-medical",
+      "description": "Modern hospital emergency room",
+      "imageUrl": "https://picsum.photos/seed/med1/1200/800",
+      "imageHint": "hospital emergency"
+    },
+    {
+      "id": "ambulance-fleet",
+      "description": "Modern ambulance unit",
+      "imageUrl": "https://picsum.photos/seed/amb1/600/400",
+      "imageHint": "ambulance vehicle"
+    },
+    {
+      "id": "doctor-dispatch",
+      "description": "Doctor looking at a digital tablet",
+      "imageUrl": "https://picsum.photos/seed/doc1/400/400",
+      "imageHint": "doctor medical"
+    }
+  ]
 }
