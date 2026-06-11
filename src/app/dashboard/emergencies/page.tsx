@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState } from 'react';
@@ -6,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Search, Filter, MoreHorizontal, FileText, MapPin, Eye, XCircle } from 'lucide-react';
+import { Plus, Search, Filter, MoreHorizontal, FileText, MapPin, Eye, XCircle, Activity, GitFork, Database } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Card, CardContent } from "@/components/ui/card";
 import { mockEmergencies } from "@/app/lib/mock-data";
@@ -14,15 +13,32 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { sendMessageToN8n } from '@/lib/n8n-service';
+import { toast } from '@/hooks/use-toast';
 
 export default function EmergenciesPage() {
   const [searchTerm, setSearchTerm] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  const handleCreateEmergency = async () => {
+    setIsProcessing(true);
+    try {
+      // Simulación: Enviamos la descripción a n8n para pre-procesamiento LangChain/RAG
+      await sendMessageToN8n("Nueva emergencia registrada", { type: 'registration' });
+      toast({
+        title: "Emergencia Registrada",
+        description: "n8n ha procesado el incidente y el algoritmo A* está calculando la ruta.",
+      });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
 
   const priorityColors = {
-    low: "bg-slate-100 text-slate-700 hover:bg-slate-100",
-    medium: "bg-blue-100 text-blue-700 hover:bg-blue-100",
-    high: "bg-amber-100 text-amber-700 hover:bg-amber-100",
-    critical: "bg-destructive/10 text-destructive hover:bg-destructive/10 animate-pulse",
+    low: "bg-slate-100 text-slate-700",
+    medium: "bg-blue-100 text-blue-700",
+    high: "bg-amber-100 text-amber-700",
+    critical: "bg-destructive/10 text-destructive animate-pulse",
   };
 
   const statusMap = {
@@ -39,7 +55,7 @@ export default function EmergenciesPage() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-2xl font-headline font-bold text-slate-900">Gestión de Emergencias</h1>
-          <p className="text-slate-500">Supervisión y despacho de incidentes activos.</p>
+          <p className="text-slate-500">Supervisión vía n8n + Algoritmo A*.</p>
         </div>
         
         <Dialog>
@@ -54,10 +70,10 @@ export default function EmergenciesPage() {
                 <div className="p-2 bg-primary/10 rounded-xl">
                   <Activity className="h-6 w-6 text-primary" />
                 </div>
-                Registrar Nueva Emergencia
+                Registro con n8n & A*
               </DialogTitle>
               <DialogDescription>
-                Complete los datos para activar el despacho inteligente.
+                Se enviará la descripción a LangChain para triaje y se calculará la ruta con A*.
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-6 py-4">
@@ -74,20 +90,15 @@ export default function EmergenciesPage() {
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="condition">Descripción del Caso</Label>
-                  <Textarea id="condition" placeholder="Describa los síntomas y condición actual..." className="min-h-[100px]" />
+                  <Label htmlFor="condition">Descripción (Procesada por LangChain)</Label>
+                  <Textarea id="condition" placeholder="Describe el incidente para que n8n identifique protocolos previos..." className="min-h-[100px]" />
                 </div>
               </div>
 
               <div className="space-y-4">
-                <h3 className="font-bold text-slate-800 border-b pb-2">Ubicación y Triaje</h3>
-                <div className="space-y-2">
-                  <Label htmlFor="address">Dirección de la Emergencia</Label>
-                  <div className="relative">
-                    <MapPin className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
-                    <Input id="address" placeholder="Calle Falsa 123, Sector 4" className="pl-10" />
-                  </div>
-                </div>
+                <h3 className="font-bold text-slate-800 border-b pb-2 flex items-center gap-2">
+                  <GitFork className="h-4 w-4" /> Triaje y Destino (A*)
+                </h3>
                 <div className="space-y-2">
                   <Label htmlFor="priority">Nivel de Prioridad</Label>
                   <Select>
@@ -95,10 +106,10 @@ export default function EmergenciesPage() {
                       <SelectValue placeholder="Seleccione prioridad" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="low">Baja (No urgente)</SelectItem>
-                      <SelectItem value="medium">Media (Urgente)</SelectItem>
-                      <SelectItem value="high">Alta (Muy urgente)</SelectItem>
-                      <SelectItem value="critical">Crítica (Riesgo vital)</SelectItem>
+                      <SelectItem value="low">Baja</SelectItem>
+                      <SelectItem value="medium">Media</SelectItem>
+                      <SelectItem value="high">Alta</SelectItem>
+                      <SelectItem value="critical">Crítica</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -106,7 +117,13 @@ export default function EmergenciesPage() {
             </div>
             <DialogFooter className="gap-2 sm:gap-0">
               <Button variant="outline" className="rounded-full">Cancelar</Button>
-              <Button className="rounded-full bg-primary medical-gradient border-none shadow-lg">Generar Ruta Inteligente</Button>
+              <Button 
+                className="rounded-full bg-primary border-none shadow-lg flex items-center gap-2"
+                onClick={handleCreateEmergency}
+                disabled={isProcessing}
+              >
+                <GitFork className="h-4 w-4" /> {isProcessing ? 'Procesando en n8n...' : 'Activar n8n & A*'}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -118,18 +135,15 @@ export default function EmergenciesPage() {
             <div className="relative w-full md:w-96">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
               <Input
-                placeholder="Buscar por ID o paciente..."
+                placeholder="Buscar incidentes históricos (RAG)..."
                 className="pl-10 border-slate-200 rounded-full"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
-            <div className="flex items-center gap-2 w-full md:w-auto">
+            <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" className="rounded-full">
-                <Filter className="mr-2 h-4 w-4" /> Filtros
-              </Button>
-              <Button variant="outline" size="sm" className="rounded-full">
-                Exportar CSV
+                <Database className="mr-2 h-4 w-4" /> RAG History
               </Button>
             </div>
           </div>
@@ -137,12 +151,11 @@ export default function EmergenciesPage() {
             <Table>
               <TableHeader className="bg-slate-50">
                 <TableRow>
-                  <TableHead className="font-bold">ID Emergencia</TableHead>
+                  <TableHead className="font-bold">ID</TableHead>
                   <TableHead className="font-bold">Prioridad</TableHead>
                   <TableHead className="font-bold">Paciente / Condición</TableHead>
                   <TableHead className="font-bold">Ubicación</TableHead>
                   <TableHead className="font-bold">Estado</TableHead>
-                  <TableHead className="font-bold">Despacho</TableHead>
                   <TableHead className="font-bold text-right">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
@@ -172,16 +185,6 @@ export default function EmergenciesPage() {
                         {statusMap[emergency.status].label}
                       </Badge>
                     </TableCell>
-                    <TableCell>
-                      {emergency.ambulanceId ? (
-                        <div className="text-xs">
-                          <p className="font-bold text-slate-700">Amb: {emergency.ambulanceId}</p>
-                          <p className="text-slate-500">Hosp: {emergency.hospitalId}</p>
-                        </div>
-                      ) : (
-                        <span className="text-xs text-slate-400 italic">No asignado</span>
-                      )}
-                    </TableCell>
                     <TableCell className="text-right">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -191,13 +194,10 @@ export default function EmergenciesPage() {
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="rounded-xl">
                           <DropdownMenuItem className="cursor-pointer">
-                            <Eye className="mr-2 h-4 w-4" /> Ver detalle
+                            <Eye className="mr-2 h-4 w-4" /> Ver en Mapa (A*)
                           </DropdownMenuItem>
                           <DropdownMenuItem className="cursor-pointer">
-                            <FileText className="mr-2 h-4 w-4" /> Reporte médico
-                          </DropdownMenuItem>
-                          <DropdownMenuItem className="cursor-pointer text-destructive focus:text-destructive">
-                            <XCircle className="mr-2 h-4 w-4" /> Cancelar
+                            <FileText className="mr-2 h-4 w-4" /> Consultar RAG
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -210,25 +210,5 @@ export default function EmergenciesPage() {
         </CardContent>
       </Card>
     </div>
-  );
-}
-
-// Re-using icon for dialog
-function Activity(props: any) {
-  return (
-    <svg
-      {...props}
-      xmlns="http://www.w3.org/2000/svg"
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-    </svg>
   );
 }

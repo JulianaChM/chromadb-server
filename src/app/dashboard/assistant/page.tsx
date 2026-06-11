@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useRef, useEffect } from 'react';
@@ -7,14 +6,15 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Activity, Send, Bot, User, Loader2, Sparkles, BookOpen, MapPin, History } from 'lucide-react';
-import { aiProtocolAndInfoAssistant } from '@/ai/flows/ai-protocol-and-info-assistant';
+import { Activity, Send, Bot, Loader2, Sparkles, BookOpen, MapPin, History, MessageSquare, Database } from 'lucide-react';
+import { sendMessageToN8n } from '@/lib/n8n-service';
 
 type Message = {
   id: string;
   role: 'assistant' | 'user';
   content: string;
   timestamp: Date;
+  isRagResult?: boolean;
 };
 
 export default function AssistantPage() {
@@ -22,7 +22,7 @@ export default function AssistantPage() {
     {
       id: '1',
       role: 'assistant',
-      content: 'Hola, soy CodeBlueAI, tu asistente inteligente de despacho. ¿En qué puedo ayudarte hoy? Puedo explicarte protocolos médicos, detalles de rutas o disponibilidad hospitalaria.',
+      content: 'Hola, soy el asistente de CodeBlueAI conectado vía n8n. Puedo consultar el historial de emergencias (RAG) y guiarte en protocolos médicos.',
       timestamp: new Date(),
     },
   ]);
@@ -32,7 +32,10 @@ export default function AssistantPage() {
 
   useEffect(() => {
     if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      const scrollContainer = scrollRef.current.querySelector('[data-radix-scroll-area-viewport]');
+      if (scrollContainer) {
+        scrollContainer.scrollTop = scrollContainer.scrollHeight;
+      }
     }
   }, [messages]);
 
@@ -51,19 +54,22 @@ export default function AssistantPage() {
     setIsLoading(true);
 
     try {
-      const result = await aiProtocolAndInfoAssistant({ query: input });
+      // Ahora usamos n8n en lugar de Genkit/Gemini
+      const response = await sendMessageToN8n(input);
+      
       const assistantMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: result.response,
+        content: response.output,
         timestamp: new Date(),
+        isRagResult: response.sourceDocuments && response.sourceDocuments.length > 0,
       };
       setMessages((prev) => [...prev, assistantMsg]);
     } catch (error) {
       const errorMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: 'Lo siento, ha ocurrido un error al procesar tu solicitud. Por favor, intenta de nuevo.',
+        content: 'Hubo un problema al conectar con el flujo de n8n. Por favor, verifica la conexión.',
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, errorMsg]);
@@ -78,18 +84,18 @@ export default function AssistantPage() {
         <Card className="border-none shadow-sm h-full rounded-3xl overflow-hidden">
           <CardHeader className="bg-slate-50 border-b pb-4">
             <CardTitle className="text-sm font-bold flex items-center gap-2">
-              <History className="h-4 w-4 text-primary" /> Historial de Consultas
+              <Database className="h-4 w-4 text-primary" /> Historial RAG (n8n)
             </CardTitle>
           </CardHeader>
           <CardContent className="p-4 space-y-3">
             {[
-              "Protocolo RCP",
-              "Disponibilidad UCI en Hospital General",
-              "Explicación Ruta E-001",
-              "Hospitales con Trauma"
+              "Casos de RCP 2023",
+              "Incidencias en Sector 4",
+              "Protocolo n8n + LangChain",
+              "Fallas de ruta históricas"
             ].map((q, idx) => (
               <Button key={idx} variant="ghost" className="w-full justify-start text-xs rounded-xl h-auto py-3 px-3 hover:bg-slate-100 border border-transparent hover:border-slate-200">
-                <MessageSquare className="h-3 w-3 mr-2 text-slate-400" />
+                <History className="h-3 w-3 mr-2 text-slate-400" />
                 <span className="truncate">{q}</span>
               </Button>
             ))}
@@ -105,19 +111,16 @@ export default function AssistantPage() {
                 <Bot className="h-6 w-6 text-primary" />
               </div>
               <div>
-                <CardTitle className="text-base font-bold">Asistente de Protocolos</CardTitle>
+                <CardTitle className="text-base font-bold">Chatbot Operadores (n8n)</CardTitle>
                 <div className="flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse"></span>
-                  <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">AI System Active</span>
+                  <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse"></span>
+                  <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">n8n Workflow Active</span>
                 </div>
               </div>
             </div>
             <div className="flex gap-2">
               <Button variant="outline" size="sm" className="rounded-full text-xs">
-                <BookOpen className="h-3 w-3 mr-1" /> Protocolos
-              </Button>
-              <Button variant="outline" size="sm" className="rounded-full text-xs">
-                <MapPin className="h-3 w-3 mr-1" /> Rutas
+                <BookOpen className="h-3 w-3 mr-1" /> LangChain
               </Button>
             </div>
           </CardHeader>
@@ -147,6 +150,11 @@ export default function AssistantPage() {
                             : 'bg-slate-100 text-slate-800 rounded-tl-none'
                         }`}>
                           {msg.content}
+                          {msg.isRagResult && (
+                            <div className="mt-2 pt-2 border-t border-slate-200 flex items-center gap-1.5 text-[10px] font-bold text-primary">
+                              <Database className="h-3 w-3" /> INFORMACIÓN RECUPERADA DE HISTORIAL
+                            </div>
+                          )}
                         </div>
                         <p className="text-[10px] text-slate-400 px-1">
                           {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -163,7 +171,7 @@ export default function AssistantPage() {
                       </div>
                       <div className="bg-slate-100 p-4 rounded-2xl rounded-tl-none flex items-center gap-2">
                         <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                        <span className="text-xs text-slate-500 font-medium italic">Analizando protocolos...</span>
+                        <span className="text-xs text-slate-500 font-medium italic">Consultando n8n Workflow...</span>
                       </div>
                     </div>
                   </div>
@@ -174,7 +182,7 @@ export default function AssistantPage() {
             <div className="p-4 bg-slate-50/50 border-t">
               <div className="relative">
                 <Input
-                  placeholder="Pregunta sobre protocolos o disponibilidad..."
+                  placeholder="Describe el incidente para LangChain..."
                   className="pr-20 py-7 rounded-2xl border-slate-200 bg-white shadow-sm focus:ring-2 focus:ring-primary/20"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
@@ -189,32 +197,10 @@ export default function AssistantPage() {
                   <Send className="h-5 w-5" />
                 </Button>
               </div>
-              <p className="text-[10px] text-center text-slate-400 mt-2">
-                CodeBlueAI Assistant v2.0 • Provee asistencia consultiva, no reemplaza el criterio médico profesional.
-              </p>
             </div>
           </CardContent>
         </Card>
       </div>
     </div>
-  );
-}
-
-function MessageSquare(props: any) {
-  return (
-    <svg
-      {...props}
-      xmlns="http://www.w3.org/2000/svg"
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-    </svg>
   );
 }
