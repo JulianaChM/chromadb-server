@@ -3,8 +3,10 @@
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Activity, Truck, Building2, Clock, ArrowUpRight, ArrowDownRight, Users } from 'lucide-react';
-import { Area, AreaChart, ResponsiveContainer, XAxis, YAxis, Tooltip, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart } from "recharts";
+import { Area, AreaChart, ResponsiveContainer, XAxis, YAxis, Tooltip, Area as RechartsArea } from "recharts";
 import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Pie, PieChart, Cell } from "recharts";
 
 const stats = [
   { title: "Emergencias Activas", value: "24", icon: Activity, change: "+12%", trend: "up", color: "text-destructive" },
@@ -80,7 +82,7 @@ export default function DashboardPage() {
                 <XAxis dataKey="name" stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} />
                 <YAxis stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} />
                 <Tooltip />
-                <Area type="monotone" dataKey="total" stroke="hsl(var(--primary))" strokeWidth={2} fillOpacity={1} fill="url(#colorTotal)" />
+                <RechartsArea type="monotone" dataKey="total" stroke="hsl(var(--primary))" strokeWidth={2} fillOpacity={1} fill="url(#colorTotal)" />
               </AreaChart>
             </ResponsiveContainer>
           </CardContent>
@@ -91,8 +93,8 @@ export default function DashboardPage() {
             <CardTitle>Estado de la Flota</CardTitle>
             <CardDescription>Distribución actual de las unidades de ambulancia.</CardDescription>
           </CardHeader>
-          <CardContent className="h-[300px] flex items-center justify-center">
-             <ResponsiveContainer width="100%" height="100%">
+          <CardContent className="h-[300px] flex flex-col items-center justify-center">
+             <ResponsiveContainer width="100%" height="80%">
               <PieChart>
                 <Pie
                   data={pieData}
@@ -110,7 +112,7 @@ export default function DashboardPage() {
                 <Tooltip />
               </PieChart>
             </ResponsiveContainer>
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-2 w-full px-4">
               {pieData.map((item) => (
                 <div key={item.name} className="flex items-center gap-2">
                   <div className="h-3 w-3 rounded-full" style={{ backgroundColor: item.color }}></div>
@@ -147,7 +149,7 @@ export default function DashboardPage() {
                   <div className="flex items-center gap-4">
                     <div className="text-right">
                       <p className="text-xs font-bold text-destructive">CRÍTICO</p>
-                      <p className="text-xs text-muted-foreground">Hace 4 mins</p>
+                      <p className="text-xs text-muted-foreground">Hace {i * 2} mins</p>
                     </div>
                     <Badge variant="outline" className="group-hover:bg-primary group-hover:text-white transition-colors">Ver Detalle</Badge>
                   </div>
