@@ -9,7 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Activity, MapPin, Navigation, User, AlertTriangle, CheckCircle2, RefreshCcw, Loader2 } from 'lucide-react';
-import Link from 'next/link';
+import Link from 'link';
 
 export default function RegistroIncidentePage() {
   const [formData, setFormData] = useState({
@@ -29,6 +29,9 @@ export default function RegistroIncidentePage() {
   const [assignedAmbulance, setAssignedAmbulance] = useState('');
 
   const handleGetLocation = () => {
+    // Temporalmente deshabilitado por solicitud
+    return;
+    
     setIsLocating(true);
     setLocationError('');
     
@@ -110,7 +113,7 @@ export default function RegistroIncidentePage() {
     setAssignedAmbulance('');
   };
 
-  const isFormValid = formData.descripcion && formData.tipo_emergencia && formData.prioridad && formData.lat && formData.lng;
+  const isFormValid = formData.descripcion && formData.tipo_emergencia && formData.prioridad && formData.lat !== null && formData.lng !== null;
 
   if (status === 'success') {
     return (
@@ -268,27 +271,55 @@ export default function RegistroIncidentePage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="p-6 space-y-6">
-              <Button 
-                type="button"
-                variant="outline"
-                onClick={handleGetLocation}
-                className="w-full py-6 border-dashed border-2 rounded-2xl flex items-center gap-2 hover:bg-slate-50"
-                disabled={isLocating}
-              >
-                {isLocating ? <Loader2 className="h-5 w-5 animate-spin" /> : <Navigation className="h-5 w-5" />}
-                {formData.lat ? 'Actualizar ubicación' : 'Obtener mi ubicación actual'}
-              </Button>
+              <div className="space-y-4">
+                <Button 
+                  type="button"
+                  variant="outline"
+                  onClick={handleGetLocation}
+                  className="w-full py-6 border-dashed border-2 rounded-2xl flex items-center gap-2 hover:bg-slate-50 opacity-50 cursor-not-allowed"
+                  disabled={true}
+                >
+                  <Navigation className="h-5 w-5" />
+                  Obtener mi ubicación actual (Deshabilitado)
+                </Button>
 
-              {formData.lat && (
-                <div className="p-4 bg-blue-50 border border-blue-100 rounded-2xl flex items-center gap-2 text-blue-700">
-                  <CheckCircle2 className="h-5 w-5" />
-                  <p className="text-sm font-bold">Ubicación capturada: {formData.lat.toFixed(6)}, {formData.lng?.toFixed(6)}</p>
+                <div className="space-y-4 border-t pt-4">
+                  <p className="text-sm font-bold text-slate-500 uppercase tracking-wider">Ingreso Manual de Coordenadas</p>
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="lat">Latitud *</Label>
+                      <Input 
+                        id="lat"
+                        type="number"
+                        step="any"
+                        placeholder="Ej: -12.0464"
+                        className="rounded-xl"
+                        value={formData.lat === null ? '' : formData.lat}
+                        onChange={(e) => setFormData({...formData, lat: e.target.value === '' ? null : parseFloat(e.target.value)})}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="lng">Longitud *</Label>
+                      <Input 
+                        id="lng"
+                        type="number"
+                        step="any"
+                        placeholder="Ej: -77.0428"
+                        className="rounded-xl"
+                        value={formData.lng === null ? '' : formData.lng}
+                        onChange={(e) => setFormData({...formData, lng: e.target.value === '' ? null : parseFloat(e.target.value)})}
+                      />
+                    </div>
+                  </div>
                 </div>
-              )}
 
-              {locationError && (
-                <p className="text-sm font-bold text-red-600 text-center">{locationError}</p>
-              )}
+                {formData.lat !== null && formData.lng !== null && (
+                  <div className="p-4 bg-blue-50 border border-blue-100 rounded-2xl flex items-center gap-2 text-blue-700">
+                    <CheckCircle2 className="h-5 w-5" />
+                    <p className="text-sm font-bold">Ubicación capturada: {formData.lat}, {formData.lng}</p>
+                  </div>
+                )}
+              </div>
             </CardContent>
           </Card>
 
