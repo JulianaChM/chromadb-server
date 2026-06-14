@@ -13,9 +13,14 @@ export default function LandingPage() {
           </div>
           <span className="font-headline font-bold text-xl tracking-tight text-primary">CodeBlueAI</span>
         </Link>
-        <nav className="ml-auto flex gap-4 sm:gap-6">
-          <Link className="text-sm font-medium hover:text-primary transition-colors mt-2" href="#features">
+        <nav className="ml-auto flex gap-4 sm:gap-6 items-center">
+          <Link className="text-sm font-medium hover:text-primary transition-colors" href="#features">
             Features
+          </Link>
+          <Link href="/registro-incidente">
+            <Button variant="outline" className="rounded-full px-6 border-primary text-primary hover:bg-primary/5">
+              Registrar Emergencia
+            </Button>
           </Link>
           <Link href="/login">
             <Button variant="default" className="rounded-full px-6">Login</Button>
@@ -36,9 +41,9 @@ export default function LandingPage() {
                   </p>
                 </div>
                 <div className="flex flex-col gap-2 min-[400px]:flex-row">
-                  <Link href="/login">
+                  <Link href="/registro-incidente">
                     <Button size="lg" className="bg-white text-primary hover:bg-blue-50 border-none rounded-full px-8 py-6 text-lg font-semibold">
-                      Access Dispatch Command
+                      Registrar una Emergencia
                     </Button>
                   </Link>
                 </div>
