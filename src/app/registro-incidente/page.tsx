@@ -8,8 +8,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Activity, MapPin, Navigation, User, AlertTriangle, CheckCircle2, RefreshCcw, Loader2 } from 'lucide-react';
-import Link from 'link';
+import { Activity, MapPin, Navigation, User, AlertTriangle, CheckCircle2, RefreshCcw, Loader2, Home } from 'lucide-react';
+import Link from 'next/link';
 
 export default function RegistroIncidentePage() {
   const [formData, setFormData] = useState({
@@ -18,44 +18,12 @@ export default function RegistroIncidentePage() {
     prioridad: '',
     nombre_paciente: '',
     edad_aproximada: '',
-    lat: null as number | null,
-    lng: null as number | null,
+    direccion: '',
   });
 
-  const [locationError, setLocationError] = useState('');
-  const [isLocating, setIsLocating] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [status, setStatus] = useState<'idle' | 'success' | 'no-ambulance' | 'error'>('idle');
   const [assignedAmbulance, setAssignedAmbulance] = useState('');
-
-  const handleGetLocation = () => {
-    // Temporalmente deshabilitado por solicitud
-    return;
-    
-    setIsLocating(true);
-    setLocationError('');
-    
-    if (!navigator.geolocation) {
-      setLocationError('Geolocalización no soportada por su navegador.');
-      setIsLocating(false);
-      return;
-    }
-
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setFormData(prev => ({
-          ...prev,
-          lat: position.coords.latitude,
-          lng: position.coords.longitude
-        }));
-        setIsLocating(false);
-      },
-      (error) => {
-        setLocationError('No se pudo obtener la ubicación. Active los permisos de ubicación.');
-        setIsLocating(false);
-      }
-    );
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -69,10 +37,7 @@ export default function RegistroIncidentePage() {
       prioridad: formData.prioridad,
       nombre_paciente: formData.nombre_paciente,
       edad_aproximada: formData.edad_aproximada ? parseInt(formData.edad_aproximada) : null,
-      ubicacion: {
-        lat: formData.lat,
-        lng: formData.lng
-      }
+      direccion: formData.direccion
     };
 
     try {
@@ -106,14 +71,13 @@ export default function RegistroIncidentePage() {
       prioridad: '',
       nombre_paciente: '',
       edad_aproximada: '',
-      lat: null,
-      lng: null,
+      direccion: '',
     });
     setStatus('idle');
     setAssignedAmbulance('');
   };
 
-  const isFormValid = formData.descripcion && formData.tipo_emergencia && formData.prioridad && formData.lat !== null && formData.lng !== null;
+  const isFormValid = formData.descripcion && formData.tipo_emergencia && formData.prioridad && formData.direccion;
 
   if (status === 'success') {
     return (
@@ -270,55 +234,21 @@ export default function RegistroIncidentePage() {
                 <MapPin className="h-5 w-5 text-primary" /> Ubicación de la Emergencia
               </CardTitle>
             </CardHeader>
-            <CardContent className="p-6 space-y-6">
-              <div className="space-y-4">
-                <Button 
-                  type="button"
-                  variant="outline"
-                  onClick={handleGetLocation}
-                  className="w-full py-6 border-dashed border-2 rounded-2xl flex items-center gap-2 hover:bg-slate-50 opacity-50 cursor-not-allowed"
-                  disabled={true}
-                >
-                  <Navigation className="h-5 w-5" />
-                  Obtener mi ubicación actual (Deshabilitado)
-                </Button>
-
-                <div className="space-y-4 border-t pt-4">
-                  <p className="text-sm font-bold text-slate-500 uppercase tracking-wider">Ingreso Manual de Coordenadas</p>
-                  <div className="grid md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="lat">Latitud *</Label>
-                      <Input 
-                        id="lat"
-                        type="number"
-                        step="any"
-                        placeholder="Ej: -12.0464"
-                        className="rounded-xl"
-                        value={formData.lat === null ? '' : formData.lat}
-                        onChange={(e) => setFormData({...formData, lat: e.target.value === '' ? null : parseFloat(e.target.value)})}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="lng">Longitud *</Label>
-                      <Input 
-                        id="lng"
-                        type="number"
-                        step="any"
-                        placeholder="Ej: -77.0428"
-                        className="rounded-xl"
-                        value={formData.lng === null ? '' : formData.lng}
-                        onChange={(e) => setFormData({...formData, lng: e.target.value === '' ? null : parseFloat(e.target.value)})}
-                      />
-                    </div>
-                  </div>
+            <CardContent className="p-6 space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="direccion">Indica la Dirección *</Label>
+                <div className="relative">
+                  <Home className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                  <Input 
+                    id="direccion" 
+                    required
+                    placeholder="Calle, Número, Ciudad o Referencia" 
+                    className="pl-10 h-11 rounded-xl"
+                    value={formData.direccion}
+                    onChange={(e) => setFormData({...formData, direccion: e.target.value})}
+                  />
                 </div>
-
-                {formData.lat !== null && formData.lng !== null && (
-                  <div className="p-4 bg-blue-50 border border-blue-100 rounded-2xl flex items-center gap-2 text-blue-700">
-                    <CheckCircle2 className="h-5 w-5" />
-                    <p className="text-sm font-bold">Ubicación capturada: {formData.lat}, {formData.lng}</p>
-                  </div>
-                )}
+                <p className="text-[10px] text-slate-400 font-medium">La geolocalización automática está desactivada temporalmente.</p>
               </div>
             </CardContent>
           </Card>
