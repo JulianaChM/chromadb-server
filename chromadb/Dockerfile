@@ -4,4 +4,4 @@ FROM chromadb/chroma:latest
 EXPOSE 10000
 
 # Añadimos el comando "run" exigido por la nueva versión de ChromaDB
-CMD ["run", "--host", "0.0.0.0", "--port", "10000", "--data-dir", "/chroma-data"]
+CMD ["run", "--host", "0.0.0.0", "--port", "10000"]
