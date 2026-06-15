@@ -28,7 +28,7 @@ interface EvaluatedUnit {
   ambulance: any;
   duration: number;
   distance: number;
-  hospital: any;
+  hospital: any; // Este será el hospital pre-seleccionado por A*
   points: [number, number][];
 }
 
@@ -107,6 +107,7 @@ export default function DispatchMapPage() {
     return incidentes.find((i: any) => i.id === selectedIncidentId);
   }, [incidentes, selectedIncidentId]);
 
+  // EFECTO PRINCIPAL: Búsqueda de Solución Óptima con A*
   useEffect(() => {
     if (!currentIncident || !ambulancias || !hospitales || isSimulating) {
       if (!isSimulating) {
@@ -116,72 +117,70 @@ export default function DispatchMapPage() {
       return;
     }
 
-    // Ejecución de comparativa de algoritmos A* y BFS
     const availableAmbs = ambulancias.filter((a: any) => a.estado?.toUpperCase() === 'DISPONIBLE');
-    if (availableAmbs.length > 0) {
-      const bfsRes = findBestDispatchBFS(availableAmbs, currentIncident, hospitales);
-      const aStarRes = findBestDispatchAStar(availableAmbs, currentIncident, hospitales);
 
-      console.log("[BFS]");
-      console.log("ambulanciaElegida:", bfsRes?.ambulanciaElegida?.placa);
-      console.log("hospitalElegido:", bfsRes?.hospitalElegido?.nombre || bfsRes?.hospitalElegido?.name);
-      console.log("costoTotal:", bfsRes?.costoTotal);
-      console.log("nodosExplorados:", bfsRes?.nodosExplorados);
-      console.log("tiempoEjecucion:", bfsRes?.tiempoEjecucion, "ms");
-
-      console.log("[A*]");
-      console.log("ambulanciaElegida:", aStarRes?.ambulanciaElegida?.placa);
-      console.log("hospitalElegido:", aStarRes?.hospitalElegido?.nombre || aStarRes?.hospitalElegido?.name);
-      console.log("costoTotal:", aStarRes?.costoTotal);
-      console.log("nodosExplorados:", aStarRes?.nodosExplorados);
-      console.log("tiempoEjecucion:", aStarRes?.tiempoEjecucion, "ms");
+    if (availableAmbs.length === 0) {
+      setEvaluatedUnits([]);
+      setBestUnit(null);
+      return;
     }
 
-    const findBestRouteByETA = async () => {
-      setIsCalculating(true);
-      const availableAmbs = ambulancias.filter((a: any) => 
-        a.estado?.toUpperCase() === 'DISPONIBLE' && 
-        typeof a.lat === 'number' && typeof a.lng === 'number'
-      );
+    // 1. Ejecutar Comparativa Académica (Logs solicitados)
+    const bfsRes = findBestDispatchBFS(availableAmbs, currentIncident, hospitales);
+    const aStarRes = findBestDispatchAStar(availableAmbs, currentIncident, hospitales);
 
-      if (availableAmbs.length === 0) {
-        setEvaluatedUnits([]);
-        setBestUnit(null);
-        setIsCalculating(false);
-        return;
-      }
+    if (bfsRes) {
+      console.log("[BFS]");
+      console.log("ambulanciaElegida:", bfsRes.ambulanciaElegida?.placa);
+      console.log("hospitalElegido:", bfsRes.hospitalElegido?.nombre);
+      console.log("costoTotal:", bfsRes.costoTotal);
+      console.log("nodosExplorados:", bfsRes.nodosExplorados);
+      console.log("tiempoEjecucion:", bfsRes.tiempoEjecucion, "ms");
+    }
 
-      try {
-        const evaluationPromises = availableAmbs.map(async (amb: any) => {
+    if (aStarRes) {
+      console.log("[A* DESPACHO]");
+      console.log("ambulanciaElegida:", aStarRes.ambulanciaElegida?.placa);
+      console.log("hospitalElegido:", aStarRes.hospitalElegido?.nombre);
+      console.log("costoTotal:", aStarRes.costoTotal);
+      console.log("nodosExplorados:", aStarRes.nodosExplorados);
+      console.log("tiempoEjecucion:", aStarRes.tiempoEjecucion, "ms");
+
+      // 2. Utilizar A* para liderar la simulación y la interfaz
+      const solveWithAStar = async () => {
+        setIsCalculating(true);
+        try {
+          const amb = aStarRes.ambulanciaElegida;
+          const hosp = aStarRes.hospitalElegido;
+
+          // Solo pedimos OSRM para la ambulancia ganadora de A*
           const url = `https://router.project-osrm.org/route/v1/driving/${amb.lng},${amb.lat};${currentIncident.lng},${currentIncident.lat}?overview=full&geometries=geojson`;
           const response = await fetch(url);
           const data = await response.json();
 
           if (data.code === 'Ok' && data.routes.length > 0) {
             const route = data.routes[0];
-            return {
+            const unitData: EvaluatedUnit = {
               ambulance: amb,
               duration: route.duration / 60,
               distance: route.distance / 1000,
               points: route.geometry.coordinates.map((c: [number, number]) => [c[1], c[0]]),
-              hospital: hospitales.find((h: any) => h.id === amb.hospital_id)
-            } as EvaluatedUnit;
+              hospital: hosp // Guardamos el hospital óptimo pre-seleccionado por A*
+            };
+            
+            setBestUnit(unitData);
+            setEvaluatedUnits([unitData]); // En este nuevo flujo, A* es el único que evaluamos visualmente
           }
-          return null;
-        });
+        } catch (error) {
+          console.error("Error al obtener ruta real para decisión A*:", error);
+        } finally {
+          setIsCalculating(false);
+        }
+      };
 
-        const results = (await Promise.all(evaluationPromises)).filter((r): r is EvaluatedUnit => r !== null);
-        const sorted = results.sort((a, b) => a.duration - b.duration);
-        setEvaluatedUnits(sorted);
-        setBestUnit(sorted.length > 0 ? sorted[0] : null);
-      } catch (error) {
-        console.error("Error calculando ETAs:", error);
-      } finally {
-        setIsCalculating(false);
-      }
-    };
+      solveWithAStar();
+    }
 
-    findBestRouteByETA();
   }, [currentIncident, ambulancias, hospitales, isSimulating]);
 
   const handleConfirmDispatch = async () => {
@@ -189,10 +188,11 @@ export default function DispatchMapPage() {
 
     const incidentId = selectedIncidentId;
     const ambulanceId = bestUnit.ambulance.id;
+    const hospitalDestino = bestUnit.hospital; // Usamos el hospital pre-seleccionado por A*
     const initialRoute = [...bestUnit.points];
     const incidentCoords = [currentIncident.lat, currentIncident.lng];
 
-    console.log(`[SIM] Iniciando despacho para incidente ${incidentId} con unidad ${bestUnit.ambulance.placa}`);
+    console.log(`[SIM] Iniciando despacho A* para incidente ${incidentId} con unidad ${bestUnit.ambulance.placa}`);
     setIsSimulating(true);
     setSimulatingAmbulanceId(ambulanceId);
     setSimulatedCoords(initialRoute[0]);
@@ -204,7 +204,6 @@ export default function DispatchMapPage() {
       const incRef = doc(db, 'incidentes', incidentId);
 
       // FASE 1: ACTUALIZACIÓN INICIAL - Ambulancia e Incidente "EN_RUTA"
-      console.log(`[SIM] Fase 1: Actualizando estados a EN_RUTA`);
       await updateDoc(ambRef, { estado: 'EN_RUTA' });
       await updateDoc(incRef, { 
         estado: 'EN_RUTA',
@@ -216,7 +215,6 @@ export default function DispatchMapPage() {
       await runAnimation(initialRoute, 50);
 
       // FASE 2: LLEGADA AL INCIDENTE - Incidente "EN_PROCESO", Ambulancia "OCUPADA"
-      console.log(`[SIM] Fase 2: Llegada al incidente. Incidente EN_PROCESO.`);
       setSimulationPhase('to-hospital');
       await updateDoc(incRef, { estado: 'EN_PROCESO' });
       await updateDoc(ambRef, { 
@@ -225,10 +223,9 @@ export default function DispatchMapPage() {
         lng: incidentCoords[1]
       });
 
-      const nearestHospital = findNearestHospital(incidentCoords);
-      if (nearestHospital) {
-        console.log(`[SIM] Hospital más cercano: ${nearestHospital.nombre}. Iniciando traslado.`);
-        const url = `https://router.project-osrm.org/route/v1/driving/${incidentCoords[1]},${incidentCoords[0]};${nearestHospital.lng},${nearestHospital.lat}?overview=full&geometries=geojson`;
+      if (hospitalDestino) {
+        console.log(`[SIM] Trasladando al Hospital Óptimo (A*): ${hospitalDestino.nombre}.`);
+        const url = `https://router.project-osrm.org/route/v1/driving/${incidentCoords[1]},${incidentCoords[0]};${hospitalDestino.lng},${hospitalDestino.lat}?overview=full&geometries=geojson`;
         const response = await fetch(url);
         const hospitalRouteData = await response.json();
 
@@ -240,12 +237,11 @@ export default function DispatchMapPage() {
           await runAnimation(hospitalRoute, 50);
 
           // FASE 3: LLEGADA AL HOSPITAL - Incidente "COMPLETADO", Ambulancia "DISPONIBLE"
-          console.log(`[SIM] Fase 3: Llegada al hospital. Incidente COMPLETADO.`);
-          const hospitalRef = doc(db, 'hospitales', nearestHospital.id);
+          const hospitalRef = doc(db, 'hospitales', hospitalDestino.id);
           
           await updateDoc(incRef, { 
             estado: 'COMPLETADO',
-            hospital_id: nearestHospital.id,
+            hospital_id: hospitalDestino.id,
             finalizado_at: new Date().toISOString()
           });
 
@@ -255,9 +251,9 @@ export default function DispatchMapPage() {
           
           await updateDoc(ambRef, {
             estado: 'DISPONIBLE',
-            lat: nearestHospital.lat,
-            lng: nearestHospital.lng,
-            hospital_id: nearestHospital.id
+            lat: hospitalDestino.lat,
+            lng: hospitalDestino.lng,
+            hospital_id: hospitalDestino.id
           });
         }
       }
@@ -272,7 +268,6 @@ export default function DispatchMapPage() {
         setSelectedIncidentId(null);
         setBestUnit(null);
         setEvaluatedUnits([]);
-        console.log(`[SIM] Ciclo completo finalizado.`);
       }, 1500);
 
     } catch (error) {
@@ -296,26 +291,6 @@ export default function DispatchMapPage() {
     });
   };
 
-  const findNearestHospital = (origin: any) => {
-    if (!hospitales) return null;
-    const availableHospitals = hospitales.filter((h: any) => h.capacidad_disponible > 0);
-    
-    if (availableHospitals.length === 0) return null;
-
-    let nearest = null;
-    let minDistance = Infinity;
-
-    availableHospitals.forEach((h: any) => {
-      const dist = Math.sqrt(Math.pow(h.lat - origin[0], 2) + Math.pow(h.lng - origin[1], 2));
-      if (dist < minDistance) {
-        minDistance = dist;
-        nearest = h;
-      }
-    });
-
-    return nearest;
-  };
-
   return (
     <div className="flex flex-col lg:flex-row gap-6 h-[calc(100vh-10rem)] animate-in fade-in duration-700">
       <div className="flex-1 relative bg-slate-100 rounded-3xl overflow-hidden border-4 border-white shadow-inner shadow-slate-300 z-10">
@@ -329,7 +304,7 @@ export default function DispatchMapPage() {
               <div className="bg-white p-6 rounded-3xl shadow-2xl flex flex-col items-center gap-4">
                 <Loader2 className="h-10 w-10 text-primary animate-spin" />
                 <p className="text-sm font-bold text-slate-800">
-                  {isCalculating ? "Calculando rutas óptimas..." : "Sincronizando..."}
+                  {isCalculating ? "A* calculando solución óptima..." : "Sincronizando..."}
                 </p>
               </div>
             </div>
@@ -413,7 +388,7 @@ export default function DispatchMapPage() {
           <Card className="shadow-2xl border-none rounded-2xl bg-white/95 backdrop-blur">
             <CardHeader className="p-4 pb-2">
               <CardTitle className="text-sm font-bold flex items-center gap-2 text-slate-800">
-                <AlertCircle className="h-4 w-4 text-primary" /> Despacho de Incidentes
+                <AlertCircle className="h-4 w-4 text-primary" /> Despacho Inteligente (A*)
               </CardTitle>
             </CardHeader>
             <CardContent className="p-4 pt-0">
@@ -438,7 +413,7 @@ export default function DispatchMapPage() {
         <Card className="border-none shadow-xl rounded-3xl overflow-hidden flex flex-col flex-1 bg-white">
           <CardHeader className="bg-slate-50 border-b">
             <CardTitle className="text-base font-bold flex items-center gap-2 text-slate-800">
-              <GitFork className="h-4 w-4 text-primary" /> Algoritmo de Respuesta
+              <GitFork className="h-4 w-4 text-primary" /> Solución Óptima A*
             </CardTitle>
           </CardHeader>
           
@@ -449,7 +424,7 @@ export default function DispatchMapPage() {
                   <div className="bg-slate-100 h-16 w-16 rounded-full flex items-center justify-center mx-auto">
                     <Navigation className="h-8 w-8 text-slate-400" />
                   </div>
-                  <p className="text-sm text-slate-500 font-medium px-4">Seleccione una emergencia para analizar las rutas óptimas.</p>
+                  <p className="text-sm text-slate-500 font-medium px-4">Seleccione una emergencia para que A* calcule la mejor respuesta.</p>
                 </div>
               ) : isCalculating ? (
                 <div className="space-y-4 animate-pulse">
@@ -461,7 +436,7 @@ export default function DispatchMapPage() {
                 <div className="space-y-6">
                   <div className={`p-4 rounded-2xl border transition-all duration-500 ${isSimulating ? 'bg-amber-50 border-amber-200 ring-2 ring-amber-100' : 'bg-primary/5 border-primary/20'}`}>
                     <p className="text-[10px] font-bold uppercase tracking-widest mb-3 text-primary">
-                      {isSimulating ? `SIMULANDO: ${simulationPhase === 'to-incident' ? 'AL INCIDENTE' : 'TRASLADO HOSPITAL'}` : 'UNIDAD RECOMENDADA'}
+                      {isSimulating ? `SIMULANDO: ${simulationPhase === 'to-incident' ? 'AL INCIDENTE' : 'TRASLADO HOSPITAL'}` : 'RECOMENDACIÓN A*'}
                     </p>
                     <div className="flex items-center justify-between mb-4">
                       <div>
@@ -474,19 +449,24 @@ export default function DispatchMapPage() {
                       </Badge>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-2 gap-3 mb-4">
                       <div className="bg-white p-3 rounded-xl border border-slate-100">
-                        <Clock className="h-4 w-4 text-primary mb-1" />
+                        <p className="text-[9px] font-bold text-slate-400 uppercase">Tiempo Est.</p>
                         <p className="text-lg font-bold text-slate-800">
                           {Math.round(bestUnit?.duration || 0) || '--'} min
                         </p>
                       </div>
                       <div className="bg-white p-3 rounded-xl border border-slate-100">
-                        <Ruler className="h-4 w-4 text-primary mb-1" />
+                        <p className="text-[9px] font-bold text-slate-400 uppercase">Distancia</p>
                         <p className="text-lg font-bold text-slate-800">
                           {bestUnit?.distance.toFixed(1) || '--'} km
                         </p>
                       </div>
+                    </div>
+
+                    <div className="bg-white p-4 rounded-xl border border-slate-100 space-y-1">
+                      <p className="text-[9px] font-bold text-slate-400 uppercase">Hospital Destino (A*)</p>
+                      <p className="text-sm font-bold text-slate-700 truncate">{bestUnit?.hospital?.nombre}</p>
                     </div>
 
                     {isSimulating && (
@@ -499,29 +479,29 @@ export default function DispatchMapPage() {
                     )}
                   </div>
 
-                  {!isSimulating && evaluatedUnits.length > 1 && (
-                    <div className="space-y-3">
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Otras Unidades Disponibles</p>
-                      {evaluatedUnits.slice(1).map((unit) => (
-                        <div key={unit.ambulance.id} className="flex items-center justify-between p-3 rounded-xl border bg-slate-50">
-                          <span className="text-xs font-bold text-slate-700">{unit.ambulance.placa}</span>
-                          <span className="text-xs font-bold text-slate-800">{Math.round(unit.duration)} min</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  <div className="p-4 rounded-2xl border border-slate-100 bg-slate-50 space-y-2">
+                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Métricas del Algoritmo</p>
+                     <div className="flex justify-between text-xs">
+                        <span className="text-slate-500">Nodos explorados:</span>
+                        <span className="font-bold">{(incidentes && ambulancias && hospitales) ? findBestDispatchAStar(ambulancias.filter((a: any) => a.estado?.toUpperCase() === 'DISPONIBLE'), currentIncident, hospitales)?.nodosExplorados : '--'}</span>
+                     </div>
+                     <div className="flex justify-between text-xs">
+                        <span className="text-slate-500">Costo G (Euclidiano):</span>
+                        <span className="font-bold">{(incidentes && ambulancias && hospitales) ? findBestDispatchAStar(ambulancias.filter((a: any) => a.estado?.toUpperCase() === 'DISPONIBLE'), currentIncident, hospitales)?.costoTotal.toFixed(4) : '--'}</span>
+                     </div>
+                  </div>
                 </div>
               )}
             </CardContent>
           </ScrollArea>
 
-          <div className="p-4 bg-slate-50 border-t">
+          <div className="p-4 bg-white border-t">
              <Button 
                 disabled={(!bestUnit && !isSimulating) || isCalculating || isSimulating}
                 onClick={handleConfirmDispatch}
-                className="w-full rounded-full bg-primary py-6 font-bold flex items-center justify-center gap-2"
+                className="w-full rounded-full bg-primary py-6 font-bold flex items-center justify-center gap-2 shadow-lg shadow-primary/20"
               >
-              {isSimulating ? <><Loader2 className="h-5 w-5 animate-spin" /> En Curso...</> : <><CheckCircle2 className="h-5 w-5" /> Iniciar Despacho Completo</>}
+              {isSimulating ? <><Loader2 className="h-5 w-5 animate-spin" /> En Curso...</> : <><CheckCircle2 className="h-5 w-5" /> Iniciar Plan Óptimo A*</>}
             </Button>
           </div>
         </Card>
@@ -548,3 +528,4 @@ function Activity(props: any) {
     </svg>
   );
 }
+
