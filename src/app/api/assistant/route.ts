@@ -1,37 +1,41 @@
-import { queryIncidents } from "@/lib/ai/rag";
+import { llm } from "@/lib/ai/models";
 import { NextRequest, NextResponse } from "next/server";
+import { SystemMessage, HumanMessage } from "@langchain/core/messages";
+import { CODEBLUE_SYSTEM_PROMPT } from "@/lib/ai/system-prompt";
 
 export async function POST(req: NextRequest) {
   try {
     const { question } = await req.json();
 
     if (!question) {
-      return NextResponse.json({ error: "La pregunta es requerida" }, { status: 400 });
+      return NextResponse.json(
+        { error: "La pregunta es requerida" },
+        { status: 400 }
+      );
     }
 
-    const { answer, sourceDocuments } = await queryIncidents(question);
+    // ✅ Crear mensajes con contexto del sistema
+    const messages = [
+      new SystemMessage(CODEBLUE_SYSTEM_PROMPT),
+      new HumanMessage(question),
+    ];
+
+    const response = await llm.invoke(messages);
+
+    console.log("✅ Respuesta de Gemini:", response.content);
 
     return NextResponse.json({
-      output: answer,
-      sourceDocuments: sourceDocuments,
+      output: response.content,
+      sourceDocuments: [],
     });
   } catch (error: any) {
-    // Log detallado en el servidor para nuestra referencia
-    console.error("[API /api/assistant] Error Crítico:", error);
-
-    // Crear una respuesta de error manual y robusta
-    const errorPayload = {
-      error: "Ocurrió un error en el servidor del asistente.",
-      // Asegurarnos de que siempre haya un mensaje y un stack
-      details: error.message || "No hay mensaje de error específico.",
-      stack: error.stack || "No hay stack de error disponible.",
-    };
-
-    return new Response(JSON.stringify(errorPayload), {
-      status: 500,
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    });
+    console.error("[API /api/assitant-simple] Error:", error);
+    return NextResponse.json(
+      {
+        error: "Error en el servidor",
+        details: error.message,
+      },
+      { status: 500 }
+    );
   }
 }

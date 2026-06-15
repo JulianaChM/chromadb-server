@@ -31,17 +31,36 @@ export default function RegistroIncidentePage() {
     setIsSubmitting(true);
     setStatus('idle');
 
-    const body = {
-      tipo: "emergencia",
-      descripcion: formData.descripcion,
-      tipo_emergencia: formData.tipo_emergencia,
-      prioridad: formData.prioridad,
-      nombre_paciente: formData.nombre_paciente,
-      edad_aproximada: formData.edad_aproximada ? parseInt(formData.edad_aproximada) : null,
-      direccion: formData.direccion
-    };
+    let latitude = null;
+    let longitude = null;
 
     try {
+      // 1. Geocodificación: Obtener coordenadas a partir de la dirección
+      const geoResponse = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(formData.direccion + ", Manizales, Colombia")}&limit=1`);
+      const geoData = await geoResponse.json();
+
+      if (geoData && geoData.length > 0) {
+        latitude = parseFloat(geoData[0].lat);
+        longitude = parseFloat(geoData[0].lon);
+        console.log("Geocodificación exitosa:", { latitude, longitude });
+      } else {
+        console.warn("No se pudieron obtener coordenadas para la dirección proporcionada.");
+      }
+
+      // 2. Preparar el cuerpo del mensaje para n8n incluyendo coordenadas
+      const body = {
+        tipo: "emergencia",
+        descripcion: formData.descripcion,
+        tipo_emergencia: formData.tipo_emergencia,
+        prioridad: formData.prioridad,
+        nombre_paciente: formData.nombre_paciente,
+        edad_aproximada: formData.edad_aproximada ? parseInt(formData.edad_aproximada) : null,
+        direccion: formData.direccion,
+        lat: latitude,
+        lng: longitude
+      };
+
+      // 3. Enviar al webhook de n8n
       const response = await fetch('https://linita22-3.app.n8n.cloud/webhook-test/emergencias', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -51,8 +70,9 @@ export default function RegistroIncidentePage() {
       const data = await response.json();
 
       if (data.ok === true) {
-        // Guardamos la información de la ambulancia. Si es un objeto, lo manejamos en el render.
         setAssignedAmbulance(data.ambulancia || '[Asignando...]');
+        
+        // 4. Si n8n asignó una ambulancia, actualizamos su estado en Firestore
         if (data.ambulancia?.id) {
           const db = getFirestore();
           const ambulanciaRef = doc(db, 'ambulancias', data.ambulancia.id);
@@ -67,6 +87,7 @@ export default function RegistroIncidentePage() {
         setStatus('error');
       }
     } catch (error) {
+      console.error("Error en el proceso de registro:", error);
       setStatus('error');
     } finally {
       setIsSubmitting(false);
@@ -88,7 +109,6 @@ export default function RegistroIncidentePage() {
 
   const isFormValid = formData.descripcion && formData.tipo_emergencia && formData.prioridad && formData.direccion;
 
-  // Función para renderizar el ID o Placa de forma segura
   const renderAmbulanceInfo = () => {
     if (!assignedAmbulance) return '[Asignando...]';
     if (typeof assignedAmbulance === 'object') {
@@ -268,7 +288,7 @@ export default function RegistroIncidentePage() {
                     onChange={(e) => setFormData({...formData, direccion: e.target.value})}
                   />
                 </div>
-                <p className="text-[10px] text-slate-400 font-medium">La geolocalización automática está desactivada temporalmente.</p>
+                <p className="text-[10px] text-slate-400 font-medium">Se calcularán coordenadas reales basadas en esta dirección.</p>
               </div>
             </CardContent>
           </Card>
@@ -280,7 +300,7 @@ export default function RegistroIncidentePage() {
           >
             {isSubmitting ? (
               <>
-                <Loader2 className="mr-2 h-6 w-6 animate-spin" /> Registrando...
+                <Loader2 className="mr-2 h-6 w-6 animate-spin" /> Procesando Ubicación...
               </>
             ) : (
               'Registrar Emergencia'
