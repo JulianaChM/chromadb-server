@@ -6,9 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Activity, MapPin, Navigation, User, AlertTriangle, CheckCircle2, RefreshCcw, Loader2, Home } from 'lucide-react';
+import { Activity, MapPin, User, AlertTriangle, CheckCircle2, Loader2, Home } from 'lucide-react';
 import Link from 'next/link';
 import { db } from '@/firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
@@ -24,7 +24,7 @@ export default function RegistroIncidentePage() {
   });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [status, setStatus] = useState<'idle' | 'success' | 'no-ambulance' | 'error'>('idle');
+  const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -36,8 +36,7 @@ export default function RegistroIncidentePage() {
     let longitude = -75.5174;
 
     try {
-      // 1. Geocodificación: Obtener coordenadas reales usando Nominatim (OpenStreetMap)
-      // Agregamos Manizales y Colombia para mayor precisión
+      // 1. Geocodificación: Obtener coordenadas reales usando Nominatim
       const query = encodeURIComponent(`${formData.direccion}, Manizales, Caldas, Colombia`);
       const geoResponse = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${query}&limit=1`);
       const geoData = await geoResponse.json();
@@ -45,9 +44,6 @@ export default function RegistroIncidentePage() {
       if (geoData && geoData.length > 0) {
         latitude = parseFloat(geoData[0].lat);
         longitude = parseFloat(geoData[0].lon);
-        console.log("[GEO] Ubicación encontrada:", { latitude, longitude });
-      } else {
-        console.warn("[GEO] No se encontraron coordenadas exactas, usando centro de ciudad.");
       }
 
       // 2. Crear el documento del incidente en Firestore
@@ -154,6 +150,7 @@ export default function RegistroIncidentePage() {
         )}
 
         <form onSubmit={handleSubmit} className="space-y-6">
+          {/* Bloque 1: Datos del Incidente */}
           <Card className="border-none shadow-sm rounded-3xl overflow-hidden">
             <CardHeader className="bg-slate-50 border-b">
               <CardTitle className="text-lg flex items-center gap-2">
@@ -206,35 +203,11 @@ export default function RegistroIncidentePage() {
             </CardContent>
           </Card>
 
+          {/* Bloque 2: Paciente (Ahora después de Tipo/Prioridad) */}
           <Card className="border-none shadow-sm rounded-3xl overflow-hidden">
             <CardHeader className="bg-slate-50 border-b">
               <CardTitle className="text-lg flex items-center gap-2">
-                <MapPin className="h-5 w-5 text-primary" /> Ubicación
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-6 space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="direccion">Indique la Dirección Exacta *</Label>
-                <div className="relative">
-                  <Home className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                  <Input 
-                    id="direccion" 
-                    required
-                    placeholder="Calle, Carrera, Barrio o Punto de referencia en Manizales" 
-                    className="pl-10 h-11 rounded-xl"
-                    value={formData.direccion}
-                    onChange={(e) => setFormData({...formData, direccion: e.target.value})}
-                  />
-                </div>
-                <p className="text-[10px] text-slate-400 font-medium">El sistema geolocalizará este punto automáticamente.</p>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-none shadow-sm rounded-3xl overflow-hidden">
-            <CardHeader className="bg-slate-50 border-b">
-              <CardTitle className="text-lg flex items-center gap-2">
-                <User className="h-5 w-5 text-primary" /> Paciente (Opcional)
+                <User className="h-5 w-5 text-primary" /> Paciente
               </CardTitle>
             </CardHeader>
             <CardContent className="p-6 space-y-4">
@@ -260,6 +233,32 @@ export default function RegistroIncidentePage() {
                     onChange={(e) => setFormData({...formData, edad_aproximada: e.target.value})}
                   />
                 </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Bloque 3: Ubicación (Ahora el último bloque antes del botón) */}
+          <Card className="border-none shadow-sm rounded-3xl overflow-hidden">
+            <CardHeader className="bg-slate-50 border-b">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <MapPin className="h-5 w-5 text-primary" /> Ubicación
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-6 space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="direccion">Indique la Dirección Exacta *</Label>
+                <div className="relative">
+                  <Home className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                  <Input 
+                    id="direccion" 
+                    required
+                    placeholder="Calle, Carrera, Barrio o Punto de referencia en Manizales" 
+                    className="pl-10 h-11 rounded-xl"
+                    value={formData.direccion}
+                    onChange={(e) => setFormData({...formData, direccion: e.target.value})}
+                  />
+                </div>
+                <p className="text-[10px] text-slate-400 font-medium">El sistema geolocalizará este punto automáticamente.</p>
               </div>
             </CardContent>
           </Card>
