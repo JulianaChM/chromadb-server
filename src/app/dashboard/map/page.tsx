@@ -51,24 +51,24 @@ export default function DispatchMapPage() {
   const [isCalculating, setIsCalculating] = useState(false);
   const [leafletIcons, setLeafletIcons] = useState<any>(null);
 
-  // Diagnóstico de Firestore
-  const collectionPath = 'hospitals';
-  const hospitalsRef = useMemo(() => {
+  // Diagnóstico de Firestore: Cambiado a 'hospitales' según reporte del usuario
+  const collectionPath = 'hospitales';
+  const hospitalesRef = useMemo(() => {
     console.log(`[Firestore Diagnosis] Creando referencia a la colección: "${collectionPath}"`);
     return collection(db, collectionPath);
   }, []);
 
-  const { data: hospitals, loading: hospitalsLoading, error: hospitalsError } = useCollection(hospitalsRef);
+  const { data: hospitales, loading: hospitalesLoading, error: hospitalesError } = useCollection(hospitalesRef);
 
   // Logs de depuración cada vez que cambian los datos de Firestore
   useEffect(() => {
-    if (!hospitalsLoading) {
-      if (hospitalsError) {
-        console.error(`[Firestore Error] Error al obtener hospitales de "${collectionPath}":`, hospitalsError);
+    if (!hospitalesLoading) {
+      if (hospitalesError) {
+        console.error(`[Firestore Error] Error al obtener hospitales de "${collectionPath}":`, hospitalesError);
       } else {
-        console.log(`[Firestore Success] Documentos recibidos de "${collectionPath}":`, hospitals?.length || 0);
-        if (hospitals && hospitals.length > 0) {
-          console.table(hospitals.map(h => ({ 
+        console.log(`[Firestore Success] Documentos recibidos de "${collectionPath}":`, hospitales?.length || 0);
+        if (hospitales && hospitales.length > 0) {
+          console.table(hospitales.map(h => ({ 
             id: h.id, 
             nombre: h.name || h.nombre || 'N/A', 
             hasCoords: !!(h.coordinates || h.latitude || h.lat) 
@@ -78,7 +78,7 @@ export default function DispatchMapPage() {
         }
       }
     }
-  }, [hospitals, hospitalsLoading, hospitalsError]);
+  }, [hospitales, hospitalesLoading, hospitalesError]);
 
   const getHospitalCoords = (hospital: any): [number, number] | null => {
     const lat = hospital.coordinates?.latitude ?? hospital.latitude ?? hospital.lat;
@@ -93,20 +93,20 @@ export default function DispatchMapPage() {
   const getHospitalName = (hospital: any) => hospital.name ?? hospital.nombre ?? 'Hospital sin nombre';
 
   useEffect(() => {
-    if (hospitals) {
-      hospitals.forEach((h: any) => {
+    if (hospitales) {
+      hospitales.forEach((h: any) => {
         if (!getHospitalCoords(h)) {
           console.warn(`[CodeBlueAI] El hospital con ID: ${h.id} no tiene coordenadas válidas.`, h);
         }
       });
     }
-  }, [hospitals]);
+  }, [hospitales]);
 
   const stats = useMemo(() => {
-    const total = hospitals?.length || 0;
-    const rendered = hospitals?.filter(h => getHospitalCoords(h)).length || 0;
+    const total = hospitales?.length || 0;
+    const rendered = hospitales?.filter(h => getHospitalCoords(h)).length || 0;
     return { total, rendered };
-  }, [hospitals]);
+  }, [hospitales]);
 
   useEffect(() => {
     import('leaflet').then((L) => {
@@ -193,7 +193,7 @@ export default function DispatchMapPage() {
                 <Popup>Ubicación de la Emergencia (Origen)</Popup>
               </Marker>
               
-              {hospitals?.map((hospital: any) => {
+              {hospitales?.map((hospital: any) => {
                 const coords = getHospitalCoords(hospital);
                 if (!coords) return null;
 
@@ -240,7 +240,7 @@ export default function DispatchMapPage() {
           <Card className="shadow-2xl border-none rounded-2xl bg-white/95 backdrop-blur">
             <CardHeader className="p-4 pb-2">
               <CardTitle className="text-sm font-bold flex items-center gap-2">
-                {hospitalsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <AlertCircle className="h-4 w-4 text-primary" />}
+                {hospitalesLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <AlertCircle className="h-4 w-4 text-primary" />}
                 Seleccionar Emergencia
               </CardTitle>
             </CardHeader>
@@ -267,8 +267,8 @@ export default function DispatchMapPage() {
                     <Building2 className="h-3 w-3" />
                     Telemetría Firestore
                   </div>
-                  <Badge variant={hospitalsError ? "destructive" : "outline"} className="text-[10px] font-bold">
-                    {hospitalsLoading ? 'Cargando...' : 'Real-time'}
+                  <Badge variant={hospitalesError ? "destructive" : "outline"} className="text-[10px] font-bold">
+                    {hospitalesLoading ? 'Cargando...' : 'Real-time'}
                   </Badge>
                 </div>
                 
@@ -283,16 +283,16 @@ export default function DispatchMapPage() {
                   </div>
                 </div>
 
-                {hospitalsError && (
+                {hospitalesError && (
                   <div className="mt-2 p-2 bg-destructive/10 rounded-lg border border-destructive/20 flex items-start gap-2">
                     <AlertTriangle className="h-3 w-3 text-destructive shrink-0 mt-0.5" />
                     <p className="text-[9px] text-destructive leading-tight font-medium">
-                      Error: {hospitalsError.message}
+                      Error: {hospitalesError.message}
                     </p>
                   </div>
                 )}
 
-                {!hospitalsLoading && stats.total === 0 && !hospitalsError && (
+                {!hospitalesLoading && stats.total === 0 && !hospitalesError && (
                   <p className="text-[10px] text-amber-600 mt-1 font-medium italic">
                     * Colección "{collectionPath}" vacía.
                   </p>
