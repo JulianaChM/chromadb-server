@@ -1,16 +1,16 @@
 
 "use client";
 
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { CheckCircle2, RefreshCw, GitFork, ListChecks, MapPin, AlertCircle, Loader2, Truck, Navigation, Clock, Ruler, Info } from 'lucide-react';
+import { CheckCircle2, RefreshCw, GitFork, ListChecks, MapPin, AlertCircle, Loader2, Truck, Navigation, Clock, Ruler } from 'lucide-react';
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { db, useCollection } from '@/firebase';
-import { collection, doc, updateDoc } from 'firebase/firestore';
+import { collection, doc, updateDoc, increment } from 'firebase/firestore';
 
 // Importación dinámica de Leaflet para evitar errores de SSR
 const MapContainer = dynamic(() => import('react-leaflet').then((mod) => mod.MapContainer), { ssr: false });
@@ -42,6 +42,7 @@ export default function DispatchMapPage() {
   const [simulatingAmbulanceId, setSimulatingAmbulanceId] = useState<string | null>(null);
   const [simulatedCoords, setSimulatedCoords] = useState<[number, number] | null>(null);
   const [activeSimulationPoints, setActiveSimulationPoints] = useState<[number, number][]>([]);
+  const [simulationPhase, setSimulationPhase] = useState<'to-incident' | 'to-hospital' | 'idle'>('idle');
 
   // Consultas a Firestore en tiempo real
   const hospitalesRef = useMemo(() => collection(db, 'hospitales'), []);
@@ -92,15 +93,12 @@ export default function DispatchMapPage() {
     });
   }, []);
 
-  // Incidente seleccionado actual
   const currentIncident = useMemo(() => {
     if (!incidentes || !selectedIncidentId) return null;
     return incidentes.find((i: any) => i.id === selectedIncidentId);
   }, [incidentes, selectedIncidentId]);
 
-  // Lógica de Despacho Automático por ETA (Línea de calles)
   useEffect(() => {
-    // Si estamos simulando, no queremos que las recomendaciones cambien o desaparezcan
     if (!currentIncident || !ambulancias || !hospitales || isSimulating) {
       if (!isSimulating) {
         setEvaluatedUnits([]);
@@ -111,7 +109,6 @@ export default function DispatchMapPage() {
 
     const findBestRouteByETA = async () => {
       setIsCalculating(true);
-      
       const availableAmbs = ambulancias.filter((a: any) => 
         a.estado?.toUpperCase() === 'DISPONIBLE' && 
         typeof a.lat === 'number' && typeof a.lng === 'number'
@@ -145,7 +142,6 @@ export default function DispatchMapPage() {
 
         const results = (await Promise.all(evaluationPromises)).filter((r): r is EvaluatedUnit => r !== null);
         const sorted = results.sort((a, b) => a.duration - b.duration);
-        
         setEvaluatedUnits(sorted);
         setBestUnit(sorted.length > 0 ? sorted[0] : null);
       } catch (error) {
@@ -158,79 +154,114 @@ export default function DispatchMapPage() {
     findBestRouteByETA();
   }, [currentIncident, ambulancias, hospitales, isSimulating]);
 
-  // Función para manejar la simulación de despacho progresiva
   const handleConfirmDispatch = async () => {
-    console.log("[SIM] Intento de despacho iniciado");
-
-    if (!bestUnit || !selectedIncidentId || isSimulating || !currentIncident) {
-      console.warn("[SIM] Abortado: Falta unidad, incidente o ya hay simulación activa");
-      return;
-    }
+    if (!bestUnit || !selectedIncidentId || isSimulating || !currentIncident) return;
 
     const ambulanceId = bestUnit.ambulance.id;
-    const ambulancePlaca = bestUnit.ambulance.placa;
-    const routePoints = [...bestUnit.points];
-    const destination = [currentIncident.lat, currentIncident.lng];
+    const initialRoute = [...bestUnit.points];
+    const incidentCoords = [currentIncident.lat, currentIncident.lng];
 
-    console.log("[SIM] Incidente seleccionado:", selectedIncidentId);
-    console.log("[SIM] Ambulancia elegida:", ambulancePlaca, "(ID:", ambulanceId, ")");
-    console.log("[SIM] Ruta OSRM obtenida con", routePoints.length, "puntos");
-
-    // Iniciamos estados locales para la UI
     setIsSimulating(true);
     setSimulatingAmbulanceId(ambulanceId);
-    setSimulatedCoords(routePoints[0]);
-    setActiveSimulationPoints(routePoints);
+    setSimulatedCoords(initialRoute[0]);
+    setActiveSimulationPoints(initialRoute);
+    setSimulationPhase('to-incident');
     
     try {
       const ambRef = doc(db, 'ambulancias', ambulanceId);
-      
-      // 1. Actualizar estado a EN_RUTA en Firestore
-      console.log("[SIM] Intentando cambiar estado a EN_RUTA en Firestore...");
-      updateDoc(ambRef, { estado: 'EN_RUTA' })
-        .then(() => console.log("[SIM] Estado cambiado a EN_RUTA en Firestore exitosamente"))
-        .catch(err => console.error("[SIM] Error al actualizar Firestore:", err));
+      await updateDoc(ambRef, { estado: 'EN_RUTA' });
 
-      // 2. Iniciar animación local
-      console.log("[SIM] Animación iniciada");
-      let currentStep = 0;
-      const totalSteps = routePoints.length;
-      
-      const animationInterval = setInterval(async () => {
-        if (currentStep < totalSteps) {
-          setSimulatedCoords(routePoints[currentStep]);
-          currentStep++;
-        } else {
-          // 3. Llegada al destino: Actualización final
-          clearInterval(animationInterval);
-          console.log("[SIM] Llegada al incidente. Actualizando estado a OCUPADA...");
+      // Fase 1: Trayecto al incidente
+      await runAnimation(initialRoute, 50);
+
+      // Fase 2: Llegada al incidente y búsqueda del hospital más cercano
+      setSimulationPhase('to-hospital');
+      await updateDoc(ambRef, { 
+        estado: 'OCUPADA',
+        lat: incidentCoords[0],
+        lng: incidentCoords[1]
+      });
+
+      const nearestHospital = findNearestHospital(incidentCoords);
+      if (nearestHospital) {
+        console.log("[SIM] Hospital más cercano con capacidad encontrado:", nearestHospital.nombre);
+        const url = `https://router.project-osrm.org/route/v1/driving/${incidentCoords[1]},${incidentCoords[0]};${nearestHospital.lng},${nearestHospital.lat}?overview=full&geometries=geojson`;
+        const response = await fetch(url);
+        const hospitalRouteData = await response.json();
+
+        if (hospitalRouteData.code === 'Ok' && hospitalRouteData.routes.length > 0) {
+          const hospitalRoute = hospitalRouteData.routes[0].geometry.coordinates.map((c: [number, number]) => [c[1], c[0]]);
+          setActiveSimulationPoints(hospitalRoute);
           
-          await updateDoc(ambRef, { 
-            estado: 'OCUPADA',
-            lat: destination[0],
-            lng: destination[1]
-          });
-          console.log("[SIM] Firestore actualizado a OCUPADA en coordenadas del incidente");
+          // Animar hacia el hospital
+          await runAnimation(hospitalRoute, 50);
 
-          // Limpiar simulación después de una breve pausa de éxito
-          setTimeout(() => {
-            setIsSimulating(false);
-            setSimulatingAmbulanceId(null);
-            setSimulatedCoords(null);
-            setActiveSimulationPoints([]);
-            setSelectedIncidentId(null);
-            setBestUnit(null);
-            setEvaluatedUnits([]);
-            console.log("[SIM] Simulación finalizada y estados reseteados");
-          }, 1500);
+          // Fase 3: Llegada al hospital
+          const hospitalRef = doc(db, 'hospitales', nearestHospital.id);
+          await updateDoc(hospitalRef, {
+            capacidad_disponible: increment(-1)
+          });
+          
+          await updateDoc(ambRef, {
+            estado: 'DISPONIBLE',
+            lat: nearestHospital.lat,
+            lng: nearestHospital.lng,
+            hospital_id: nearestHospital.id
+          });
         }
-      }, 80);
+      }
+
+      // Finalizar simulación
+      setTimeout(() => {
+        setIsSimulating(false);
+        setSimulatingAmbulanceId(null);
+        setSimulatedCoords(null);
+        setActiveSimulationPoints([]);
+        setSimulationPhase('idle');
+        setSelectedIncidentId(null);
+        setBestUnit(null);
+        setEvaluatedUnits([]);
+      }, 1500);
 
     } catch (error) {
-      console.error("[SIM] Error crítico en el proceso de simulación:", error);
+      console.error("[SIM] Error crítico:", error);
       setIsSimulating(false);
-      setSimulatingAmbulanceId(null);
     }
+  };
+
+  const runAnimation = (points: [number, number][], speed: number): Promise<void> => {
+    return new Promise((resolve) => {
+      let currentStep = 0;
+      const interval = setInterval(() => {
+        if (currentStep < points.length) {
+          setSimulatedCoords(points[currentStep]);
+          currentStep++;
+        } else {
+          clearInterval(interval);
+          resolve();
+        }
+      }, speed);
+    });
+  };
+
+  const findNearestHospital = (origin: any) => {
+    if (!hospitales) return null;
+    const availableHospitals = hospitales.filter((h: any) => h.capacidad_disponible > 0);
+    
+    if (availableHospitals.length === 0) return null;
+
+    let nearest = null;
+    let minDistance = Infinity;
+
+    availableHospitals.forEach((h: any) => {
+      const dist = Math.sqrt(Math.pow(h.lat - origin[0], 2) + Math.pow(h.lng - origin[1], 2));
+      if (dist < minDistance) {
+        minDistance = dist;
+        nearest = h;
+      }
+    });
+
+    return nearest;
   };
 
   return (
@@ -257,12 +288,12 @@ export default function DispatchMapPage() {
               {hospitales?.map((hospital: any) => {
                 if (typeof hospital.lat !== 'number' || typeof hospital.lng !== 'number') return null;
                 return (
-                  <Marker key={hospital.id} position={[hospital.lat, hospital.lng]} icon={leafletIcons.hospital(hospital.nombre || hospital.name, hospital.capacidad_disponible)}>
+                  <Marker key={hospital.id} position={[hospital.lat, hospital.lng]} icon={leafletIcons.hospital(hospital.nombre || hospital.name, hospital.capacidad_disponible > 0)}>
                     <Popup>
                       <div className="p-2 space-y-1">
                         <p className="font-bold text-slate-800">{hospital.nombre || hospital.name}</p>
-                        <Badge variant={hospital.capacidad_disponible ? "secondary" : "destructive"} className="text-[10px] font-bold">
-                          Disponibilidad: {hospital.capacidad_disponible ? 'SÍ' : 'NO'}
+                        <Badge variant={hospital.capacidad_disponible > 0 ? "secondary" : "destructive"} className="text-[10px] font-bold">
+                          Capacidad: {hospital.capacidad_disponible}
                         </Badge>
                       </div>
                     </Popup>
@@ -271,7 +302,6 @@ export default function DispatchMapPage() {
               })}
 
               {ambulancias?.map((ambulance: any) => {
-                // Si la ambulancia está en simulación, forzamos las coordenadas animadas y el color amarillo
                 const isThisAmbulanceSimulating = isSimulating && simulatingAmbulanceId === ambulance.id;
                 const pos: [number, number] = isThisAmbulanceSimulating && simulatedCoords 
                   ? simulatedCoords 
@@ -279,48 +309,35 @@ export default function DispatchMapPage() {
 
                 if (typeof pos[0] !== 'number' || typeof pos[1] !== 'number') return null;
                 
+                let displayStatus = ambulance.estado;
+                if (isThisAmbulanceSimulating) {
+                  displayStatus = simulationPhase === 'to-incident' ? 'EN_RUTA' : 'OCUPADA';
+                }
+
                 return (
-                  <Marker 
-                    key={ambulance.id} 
-                    position={pos} 
-                    icon={leafletIcons.ambulance(isThisAmbulanceSimulating ? 'EN_RUTA' : ambulance.estado)}
-                  >
+                  <Marker key={ambulance.id} position={pos} icon={leafletIcons.ambulance(displayStatus)}>
                     <Popup>
                       <div className="p-2 space-y-1">
                         <p className="font-bold text-slate-800">Unidad: {ambulance.placa}</p>
-                        <p className="text-xs">Estado: <span className="font-medium">{isThisAmbulanceSimulating ? 'EN RUTA' : ambulance.estado}</span></p>
-                        <p className="text-[10px] text-slate-500 italic">Hospital: {hospitales?.find(h => h.id === ambulance.hospital_id)?.nombre || '...'}</p>
+                        <p className="text-xs">Estado: <span className="font-medium">{displayStatus}</span></p>
                       </div>
                     </Popup>
                   </Marker>
                 );
               })}
 
-              {incidentes?.map((inc: any) => {
-                if (typeof inc.lat !== 'number' || typeof inc.lng !== 'number') return null;
-                return (
-                  <Marker key={inc.id} position={[inc.lat, inc.lng]} icon={leafletIcons.emergency}>
-                    <Popup>
-                      <div className="p-2">
-                        <p className="font-bold text-primary">Emergencia: {inc.id}</p>
-                        <p className="text-xs text-slate-600 mt-1">{inc.descripcion}</p>
-                        <p className="text-xs font-bold mt-2">{inc.direccion}</p>
-                      </div>
-                    </Popup>
-                  </Marker>
-                );
-              })}
+              {currentIncident && !isSimulating && (
+                <Marker position={[currentIncident.lat, currentIncident.lng]} icon={leafletIcons.emergency} />
+              )}
 
-              {/* Dibujamos la ruta (punteada si es recomendación, sólida si es simulación activa) */}
-              {(isSimulating ? activeSimulationPoints : (bestUnit?.points || [])).length > 0 && (
+              {activeSimulationPoints.length > 0 && (
                 <Polyline 
-                  positions={isSimulating ? activeSimulationPoints : (bestUnit?.points || [])}
+                  positions={activeSimulationPoints}
                   pathOptions={{ 
-                    color: isSimulating ? '#eab308' : '#1565C0', 
+                    color: simulationPhase === 'to-hospital' ? '#ef4444' : '#eab308', 
                     weight: 6, 
                     opacity: 0.8, 
-                    lineJoin: 'round', 
-                    dashArray: isSimulating ? '' : '5, 10' 
+                    lineJoin: 'round'
                   }}
                 />
               )}
@@ -336,11 +353,7 @@ export default function DispatchMapPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="p-4 pt-0">
-              <Select 
-                onValueChange={setSelectedIncidentId} 
-                value={selectedIncidentId || undefined}
-                disabled={isSimulating}
-              >
+              <Select onValueChange={setSelectedIncidentId} value={selectedIncidentId || undefined} disabled={isSimulating}>
                 <SelectTrigger className="rounded-xl border-slate-200">
                   <SelectValue placeholder="Seleccionar reporte" />
                 </SelectTrigger>
@@ -361,7 +374,7 @@ export default function DispatchMapPage() {
         <Card className="border-none shadow-xl rounded-3xl overflow-hidden flex flex-col flex-1 bg-white">
           <CardHeader className="bg-slate-50 border-b">
             <CardTitle className="text-base font-bold flex items-center gap-2 text-slate-800">
-              <GitFork className="h-4 w-4 text-primary" /> Algoritmo de Respuesta (ETA)
+              <GitFork className="h-4 w-4 text-primary" /> Algoritmo de Respuesta
             </CardTitle>
           </CardHeader>
           
@@ -372,7 +385,7 @@ export default function DispatchMapPage() {
                   <div className="bg-slate-100 h-16 w-16 rounded-full flex items-center justify-center mx-auto">
                     <Navigation className="h-8 w-8 text-slate-400" />
                   </div>
-                  <p className="text-sm text-slate-500 font-medium px-4">Seleccione una emergencia para analizar las rutas por calles.</p>
+                  <p className="text-sm text-slate-500 font-medium px-4">Seleccione una emergencia para analizar las rutas óptimas.</p>
                 </div>
               ) : isCalculating ? (
                 <div className="space-y-4 animate-pulse">
@@ -380,30 +393,20 @@ export default function DispatchMapPage() {
                     <div key={i} className="h-16 bg-slate-100 rounded-2xl w-full"></div>
                   ))}
                 </div>
-              ) : !bestUnit && !isSimulating ? (
-                <div className="p-4 rounded-2xl bg-amber-50 border border-amber-100 text-center">
-                  <Truck className="h-8 w-8 text-amber-500 mx-auto mb-2" />
-                  <p className="text-sm font-bold text-amber-800">Sin unidades disponibles</p>
-                  <p className="text-xs text-amber-600">No hay ambulancias libres actualmente.</p>
-                </div>
               ) : (
                 <div className="space-y-6">
-                  {/* Unidad Recomendada o En Simulación */}
-                  <div className={`p-4 rounded-2xl border transition-all duration-500 ${isSimulating ? 'bg-amber-50 border-amber-200 ring-2 ring-amber-100' : 'bg-primary/5 border-primary/20 ring-2 ring-primary/10'}`}>
-                    <p className={`text-[10px] font-bold uppercase tracking-widest mb-3 ${isSimulating ? 'text-amber-600' : 'text-primary'}`}>
-                      {isSimulating ? 'SIMULACIÓN EN CURSO' : 'RECOMENDACIÓN ÓPTIMA (ETA)'}
+                  <div className={`p-4 rounded-2xl border transition-all duration-500 ${isSimulating ? 'bg-amber-50 border-amber-200 ring-2 ring-amber-100' : 'bg-primary/5 border-primary/20'}`}>
+                    <p className="text-[10px] font-bold uppercase tracking-widest mb-3 text-primary">
+                      {isSimulating ? `SIMULANDO: ${simulationPhase === 'to-incident' ? 'AL INCIDENTE' : 'TRASLADO HOSPITAL'}` : 'UNIDAD RECOMENDADA'}
                     </p>
                     <div className="flex items-center justify-between mb-4">
                       <div>
                         <p className="font-bold text-slate-800 text-lg">
                           {isSimulating ? (ambulancias?.find(a => a.id === simulatingAmbulanceId)?.placa) : bestUnit?.ambulance.placa}
                         </p>
-                        <p className="text-xs text-slate-500">
-                          {isSimulating ? 'Trayecto en curso...' : (bestUnit?.hospital?.nombre || 'Hospital base')}
-                        </p>
                       </div>
-                      <Badge className={`${isSimulating ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'} border-none px-3 font-bold`}>
-                        {isSimulating ? 'EN RUTA' : 'LLEGA PRIMERO'}
+                      <Badge className="bg-green-100 text-green-700 border-none px-3 font-bold">
+                        {isSimulating ? 'ACTIVA' : 'ÓPTIMA'}
                       </Badge>
                     </div>
 
@@ -411,39 +414,27 @@ export default function DispatchMapPage() {
                       <div className="bg-white p-3 rounded-xl border border-slate-100">
                         <Clock className="h-4 w-4 text-primary mb-1" />
                         <p className="text-lg font-bold text-slate-800">
-                          {Math.round(isSimulating ? (evaluatedUnits.find(u => u.ambulance.id === simulatingAmbulanceId)?.duration || 0) : (bestUnit?.duration || 0))} min
+                          {Math.round(bestUnit?.duration || 0)} min
                         </p>
-                        <p className="text-[9px] text-slate-400 font-bold uppercase">Tiempo Real</p>
                       </div>
                       <div className="bg-white p-3 rounded-xl border border-slate-100">
                         <Ruler className="h-4 w-4 text-primary mb-1" />
                         <p className="text-lg font-bold text-slate-800">
-                          {(isSimulating ? (evaluatedUnits.find(u => u.ambulance.id === simulatingAmbulanceId)?.distance || 0) : (bestUnit?.distance || 0)).toFixed(1)} km
+                          {bestUnit?.distance.toFixed(1)} km
                         </p>
-                        <p className="text-[9px] text-slate-400 font-bold uppercase">Por calle</p>
                       </div>
                     </div>
                   </div>
 
-                  {/* Comparativa de Evaluación (Solo antes de simular) */}
                   {!isSimulating && evaluatedUnits.length > 1 && (
                     <div className="space-y-3">
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                        <ListChecks className="h-3 w-3" /> Evaluación de Unidades
-                      </p>
-                      <div className="space-y-2">
-                        {evaluatedUnits.map((unit, idx) => (
-                          <div key={unit.ambulance.id} className={`flex items-center justify-between p-3 rounded-xl border ${idx === 0 ? 'bg-primary/5 border-primary/20' : 'bg-slate-50 border-slate-100'}`}>
-                            <div className="flex items-center gap-3">
-                              <Truck className={`h-4 w-4 ${idx === 0 ? 'text-primary' : 'text-slate-400'}`} />
-                              <span className="text-xs font-bold text-slate-700">{unit.ambulance.placa}</span>
-                            </div>
-                            <div className="text-right">
-                              <span className="text-xs font-bold text-slate-800">{Math.round(unit.duration)} min</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Otras Unidades Disponibles</p>
+                      {evaluatedUnits.slice(1).map((unit) => (
+                        <div key={unit.ambulance.id} className="flex items-center justify-between p-3 rounded-xl border bg-slate-50">
+                          <span className="text-xs font-bold text-slate-700">{unit.ambulance.placa}</span>
+                          <span className="text-xs font-bold text-slate-800">{Math.round(unit.duration)} min</span>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -451,35 +442,14 @@ export default function DispatchMapPage() {
             </CardContent>
           </ScrollArea>
 
-          <div className="p-4 bg-slate-50 border-t space-y-2">
+          <div className="p-4 bg-slate-50 border-t">
              <Button 
                 disabled={(!bestUnit && !isSimulating) || isCalculating || isSimulating}
                 onClick={handleConfirmDispatch}
-                className="w-full rounded-full bg-primary shadow-lg border-none py-6 font-bold flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50"
+                className="w-full rounded-full bg-primary py-6 font-bold flex items-center justify-center gap-2"
               >
-              {isSimulating ? (
-                <>
-                  <Loader2 className="h-5 w-5 animate-spin" /> Simulando Trayecto...
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="h-5 w-5" /> Confirmar Despacho ETA
-                </>
-              )}
+              {isSimulating ? <><Loader2 className="h-5 w-5 animate-spin" /> En Curso...</> : <><CheckCircle2 className="h-5 w-5" /> Iniciar Despacho Completo</>}
             </Button>
-            {!isSimulating && (
-              <Button 
-                variant="outline" 
-                className="w-full rounded-full border-slate-200 py-6 font-bold flex items-center justify-center gap-2 text-slate-600 hover:bg-white"
-                onClick={() => {
-                  setSelectedIncidentId(null);
-                  setBestUnit(null);
-                  setEvaluatedUnits([]);
-                }}
-              >
-                <RefreshCw className="h-4 w-4" /> Nueva Selección
-              </Button>
-            )}
           </div>
         </Card>
       </div>
