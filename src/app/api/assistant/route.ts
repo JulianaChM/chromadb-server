@@ -16,7 +16,22 @@ export async function POST(req: NextRequest) {
       sourceDocuments: sourceDocuments,
     });
   } catch (error: any) {
-    console.error("Error en el endpoint del asistente:", error.message);
-    return NextResponse.json({ error: "Ocurrió un error al procesar la solicitud" }, { status: 500 });
+    // Log detallado en el servidor para nuestra referencia
+    console.error("[API /api/assistant] Error Crítico:", error);
+
+    // Crear una respuesta de error manual y robusta
+    const errorPayload = {
+      error: "Ocurrió un error en el servidor del asistente.",
+      // Asegurarnos de que siempre haya un mensaje y un stack
+      details: error.message || "No hay mensaje de error específico.",
+      stack: error.stack || "No hay stack de error disponible.",
+    };
+
+    return new Response(JSON.stringify(errorPayload), {
+      status: 500,
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
   }
 }

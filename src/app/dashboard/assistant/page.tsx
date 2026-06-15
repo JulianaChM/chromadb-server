@@ -5,14 +5,16 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { SendHorizonal } from 'lucide-react';
+import { SendHorizonal, AlertTriangle } from 'lucide-react';
 
 interface Message {
   id: string;
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'error';
   content: string;
   timestamp: Date;
   isRagResult?: boolean;
+  details?: string;
+  stack?: string;
 }
 
 async function askAssistant(question: string) {
@@ -24,12 +26,20 @@ async function askAssistant(question: string) {
         body: JSON.stringify({ question }),
     });
 
+    const responseData = await response.json();
+
     if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Falló la solicitud a la API del asistente');
+        // Si responseData está vacío, crea un objeto de error por defecto
+        if (Object.keys(responseData).length === 0) {
+            throw { 
+                error: 'Respuesta vacía del servidor', 
+                details: `El servidor respondió con un estado ${response.status} pero sin un cuerpo de error.` 
+            };
+        }
+        throw responseData; 
     }
 
-    return response.json();
+    return responseData;
 }
 
 
@@ -68,11 +78,14 @@ export default function AssistantPage() {
         isRagResult: response.sourceDocuments && response.sourceDocuments.length > 0,
       };
       setMessages((prev) => [...prev, assistantMsg]);
-    } catch (error) {
+    } catch (error: any) {
+      console.error("Error capturado en el frontend:", error);
       const errorMsg: Message = {
         id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: 'Hubo un problema al conectar con el asistente. Por favor, inténtalo de nuevo.',
+        role: 'error',
+        content: error.error || 'Hubo un problema al conectar con el asistente.',
+        details: error.details || 'No hay detalles adicionales.',
+        stack: error.stack,
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, errorMsg]);
@@ -91,23 +104,36 @@ export default function AssistantPage() {
         <CardContent className="flex-grow overflow-y-auto p-4 space-y-4">
           {messages.map((msg) => (
             <div key={msg.id} className={`flex items-start gap-3 ${msg.role === 'user' ? 'justify-end' : ''}`}>
-              {msg.role === 'assistant' && (
-                <Avatar>
-                  <AvatarFallback>IA</AvatarFallback>
-                </Avatar>
-              )}
-              <div className={`rounded-lg px-4 py-2 max-w-[70%] ${msg.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}>
-                <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
-                <time className="text-xs text-muted-foreground float-right mt-1">
-                  {msg.timestamp.toLocaleTimeString()}
-                </time>
-                {msg.isRagResult && <span className="text-xs text-blue-500 block mt-1">✓ Obtenido del historial</span>}
-              </div>
-              {msg.role === 'user' && (
-                <Avatar>
-                  <AvatarFallback>TÚ</AvatarFallback>
-                </Avatar>
-              )}
+                {msg.role !== 'user' && (
+                    <Avatar>
+                        <AvatarFallback>{msg.role === 'error' ? <AlertTriangle className="text-red-500" /> : 'IA'}</AvatarFallback>
+                    </Avatar>
+                )}
+                <div className={`rounded-lg px-4 py-2 max-w-[80%] ${msg.role === 'user' ? 'bg-primary text-primary-foreground' : msg.role === 'error' ? 'bg-destructive/10' : 'bg-muted'}`}>
+                    <p className={`text-sm whitespace-pre-wrap ${msg.role === 'error' ? 'text-red-700 font-semibold' : ''}`}>{msg.content}</p>
+                    {msg.details && (
+                        <pre className="mt-2 p-2 bg-gray-700 text-white rounded-md text-xs overflow-x-auto whitespace-pre-wrap">
+                           {msg.details}
+                        </pre>
+                    )}
+                     {msg.stack && (
+                        <details className="mt-2 text-xs">
+                            <summary className="cursor-pointer text-gray-500">Ver stack de error</summary>
+                            <pre className="mt-1 p-2 bg-gray-800 text-gray-300 rounded-md overflow-x-auto whitespace-pre-wrap">
+                               {msg.stack}
+                            </pre>
+                        </details>
+                    )}
+                    <time className="text-xs text-muted-foreground float-right mt-1">
+                        {msg.timestamp.toLocaleTimeString()}
+                    </time>
+                    {msg.isRagResult && <span className="text-xs text-blue-500 block mt-1">✓ Obtenido del historial</span>}
+                </div>
+                {msg.role === 'user' && (
+                    <Avatar>
+                        <AvatarFallback>TÚ</AvatarFallback>
+                    </Avatar>
+                )}
             </div>
           ))}
            {messages.length === 0 && (
