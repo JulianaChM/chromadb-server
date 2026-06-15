@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -41,6 +41,7 @@ export default function DispatchMapPage() {
   const [isSimulating, setIsSimulating] = useState(false);
   const [simulatingAmbulanceId, setSimulatingAmbulanceId] = useState<string | null>(null);
   const [simulatedCoords, setSimulatedCoords] = useState<[number, number] | null>(null);
+  const [activeSimulationPoints, setActiveSimulationPoints] = useState<[number, number][]>([]);
 
   // Consultas a Firestore en tiempo real
   const hospitalesRef = useMemo(() => collection(db, 'hospitales'), []);
@@ -73,10 +74,10 @@ export default function DispatchMapPage() {
       });
 
       const ambulanceIcon = (status: string) => {
-        let color = "#22c55e"; 
+        let color = "#22c55e"; // Disponible
         const s = status?.toUpperCase();
-        if (s === 'EN RUTA' || s === 'EN_RUTA' || s === 'DESPACHADA') color = "#eab308";
-        if (s === 'OCUPADA') color = "#ef4444";
+        if (s === 'EN RUTA' || s === 'EN_RUTA' || s === 'DESPACHADA') color = "#eab308"; // Amarillo
+        if (s === 'OCUPADA') color = "#ef4444"; // Rojo
         return L.divIcon({
           html: `<div style="background-color: ${color}; padding: 6px; border-radius: 8px; border: 2px solid white; box-shadow: 0 4px 6px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center;">
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -97,8 +98,9 @@ export default function DispatchMapPage() {
     return incidentes.find((i: any) => i.id === selectedIncidentId);
   }, [incidentes, selectedIncidentId]);
 
-  // Lógica de Despacho Automático por ETA
+  // Lógica de Despacho Automático por ETA (Línea de calles)
   useEffect(() => {
+    // Si estamos simulando, no queremos que las recomendaciones cambien o desaparezcan
     if (!currentIncident || !ambulancias || !hospitales || isSimulating) {
       if (!isSimulating) {
         setEvaluatedUnits([]);
@@ -156,54 +158,60 @@ export default function DispatchMapPage() {
     findBestRouteByETA();
   }, [currentIncident, ambulancias, hospitales, isSimulating]);
 
-  // Función para manejar la simulación de despacho
+  // Función para manejar la simulación de despacho progresiva
   const handleConfirmDispatch = async () => {
     if (!bestUnit || !selectedIncidentId || isSimulating) return;
 
     const ambulanceId = bestUnit.ambulance.id;
-    const routePoints = bestUnit.points;
+    const routePoints = [...bestUnit.points]; // Clonamos los puntos para la simulación
     const destination = [currentIncident.lat, currentIncident.lng];
 
+    // Iniciamos estados locales para la UI
     setIsSimulating(true);
     setSimulatingAmbulanceId(ambulanceId);
+    setSimulatedCoords(routePoints[0]);
+    setActiveSimulationPoints(routePoints);
     
-    // 1. Actualizar estado a EN RUTA en Firestore
+    // 1. Actualizar estado a EN RUTA en Firestore inmediatamente
     try {
       const ambRef = doc(db, 'ambulancias', ambulanceId);
-      await updateDoc(ambRef, { estado: 'EN_RUTA' });
+      updateDoc(ambRef, { estado: 'EN_RUTA' });
 
       // 2. Iniciar animación local
       let currentStep = 0;
+      const totalSteps = routePoints.length;
+      
       const animationInterval = setInterval(async () => {
-        if (currentStep < routePoints.length) {
+        if (currentStep < totalSteps) {
           setSimulatedCoords(routePoints[currentStep]);
           currentStep++;
         } else {
-          // 3. Llegada al destino
+          // 3. Llegada al destino: Actualización final
           clearInterval(animationInterval);
           
-          // Actualizar Firestore al llegar
           await updateDoc(ambRef, { 
             estado: 'OCUPADA',
             lat: destination[0],
             lng: destination[1]
           });
 
-          // Limpiar simulación
+          // Limpiar simulación después de una breve pausa de éxito
           setTimeout(() => {
             setIsSimulating(false);
             setSimulatingAmbulanceId(null);
             setSimulatedCoords(null);
+            setActiveSimulationPoints([]);
             setSelectedIncidentId(null);
             setBestUnit(null);
             setEvaluatedUnits([]);
-          }, 2000);
+          }, 1500);
         }
-      }, 50); // Velocidad de la animación
+      }, 80); // Velocidad ajustada para visualización clara
 
     } catch (error) {
       console.error("Error en simulación:", error);
       setIsSimulating(false);
+      setSimulatingAmbulanceId(null);
     }
   };
 
@@ -220,7 +228,7 @@ export default function DispatchMapPage() {
               <div className="bg-white p-6 rounded-3xl shadow-2xl flex flex-col items-center gap-4">
                 <Loader2 className="h-10 w-10 text-primary animate-spin" />
                 <p className="text-sm font-bold text-slate-800">
-                  {isCalculating ? "Calculando ruta óptima por calles..." : "Sincronizando con Firestore..."}
+                  {isCalculating ? "Calculando rutas óptimas..." : "Sincronizando..."}
                 </p>
               </div>
             </div>
@@ -245,7 +253,7 @@ export default function DispatchMapPage() {
               })}
 
               {ambulancias?.map((ambulance: any) => {
-                // Si la ambulancia está en simulación, usamos las coordenadas animadas
+                // Si la ambulancia está en simulación, forzamos las coordenadas animadas y el color amarillo
                 const isThisAmbulanceSimulating = isSimulating && simulatingAmbulanceId === ambulance.id;
                 const pos: [number, number] = isThisAmbulanceSimulating && simulatedCoords 
                   ? simulatedCoords 
@@ -254,7 +262,11 @@ export default function DispatchMapPage() {
                 if (typeof pos[0] !== 'number' || typeof pos[1] !== 'number') return null;
                 
                 return (
-                  <Marker key={ambulance.id} position={pos} icon={leafletIcons.ambulance(isThisAmbulanceSimulating ? 'EN_RUTA' : ambulance.estado)}>
+                  <Marker 
+                    key={ambulance.id} 
+                    position={pos} 
+                    icon={leafletIcons.ambulance(isThisAmbulanceSimulating ? 'EN_RUTA' : ambulance.estado)}
+                  >
                     <Popup>
                       <div className="p-2 space-y-1">
                         <p className="font-bold text-slate-800">Unidad: {ambulance.placa}</p>
@@ -281,15 +293,16 @@ export default function DispatchMapPage() {
                 );
               })}
 
-              {bestUnit && (
+              {/* Dibujamos la ruta (punteada si es recomendación, sólida si es simulación activa) */}
+              {(isSimulating ? activeSimulationPoints : (bestUnit?.points || [])).length > 0 && (
                 <Polyline 
-                  positions={bestUnit.points}
+                  positions={isSimulating ? activeSimulationPoints : (bestUnit?.points || [])}
                   pathOptions={{ 
                     color: isSimulating ? '#eab308' : '#1565C0', 
                     weight: 6, 
                     opacity: 0.8, 
                     lineJoin: 'round', 
-                    dashArray: isSimulating ? '' : '1, 10' 
+                    dashArray: isSimulating ? '' : '5, 10' 
                   }}
                 />
               )}
@@ -311,7 +324,7 @@ export default function DispatchMapPage() {
                 disabled={isSimulating}
               >
                 <SelectTrigger className="rounded-xl border-slate-200">
-                  <SelectValue placeholder="Seleccionar reporte real" />
+                  <SelectValue placeholder="Seleccionar reporte" />
                 </SelectTrigger>
                 <SelectContent className="rounded-xl">
                   {incidentes?.map((inc: any) => (
@@ -341,7 +354,7 @@ export default function DispatchMapPage() {
                   <div className="bg-slate-100 h-16 w-16 rounded-full flex items-center justify-center mx-auto">
                     <Navigation className="h-8 w-8 text-slate-400" />
                   </div>
-                  <p className="text-sm text-slate-500 font-medium px-4">Seleccione una emergencia real para analizar las rutas por calles.</p>
+                  <p className="text-sm text-slate-500 font-medium px-4">Seleccione una emergencia para analizar las rutas por calles.</p>
                 </div>
               ) : isCalculating ? (
                 <div className="space-y-4 animate-pulse">
@@ -349,23 +362,27 @@ export default function DispatchMapPage() {
                     <div key={i} className="h-16 bg-slate-100 rounded-2xl w-full"></div>
                   ))}
                 </div>
-              ) : !bestUnit ? (
+              ) : !bestUnit && !isSimulating ? (
                 <div className="p-4 rounded-2xl bg-amber-50 border border-amber-100 text-center">
                   <Truck className="h-8 w-8 text-amber-500 mx-auto mb-2" />
                   <p className="text-sm font-bold text-amber-800">Sin unidades disponibles</p>
-                  <p className="text-xs text-amber-600">No hay ambulancias libres en el sistema actualmente.</p>
+                  <p className="text-xs text-amber-600">No hay ambulancias libres actualmente.</p>
                 </div>
               ) : (
                 <div className="space-y-6">
-                  {/* Unidad Recomendada */}
+                  {/* Unidad Recomendada o En Simulación */}
                   <div className={`p-4 rounded-2xl border transition-all duration-500 ${isSimulating ? 'bg-amber-50 border-amber-200 ring-2 ring-amber-100' : 'bg-primary/5 border-primary/20 ring-2 ring-primary/10'}`}>
                     <p className={`text-[10px] font-bold uppercase tracking-widest mb-3 ${isSimulating ? 'text-amber-600' : 'text-primary'}`}>
                       {isSimulating ? 'SIMULACIÓN EN CURSO' : 'RECOMENDACIÓN ÓPTIMA (ETA)'}
                     </p>
                     <div className="flex items-center justify-between mb-4">
                       <div>
-                        <p className="font-bold text-slate-800 text-lg">{bestUnit.ambulance.placa}</p>
-                        <p className="text-xs text-slate-500">{bestUnit.hospital?.nombre || 'Hospital base'}</p>
+                        <p className="font-bold text-slate-800 text-lg">
+                          {isSimulating ? (ambulancias?.find(a => a.id === simulatingAmbulanceId)?.placa) : bestUnit?.ambulance.placa}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {isSimulating ? 'Trayecto en curso...' : (bestUnit?.hospital?.nombre || 'Hospital base')}
+                        </p>
                       </div>
                       <Badge className={`${isSimulating ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'} border-none px-3 font-bold`}>
                         {isSimulating ? 'EN RUTA' : 'LLEGA PRIMERO'}
@@ -375,22 +392,26 @@ export default function DispatchMapPage() {
                     <div className="grid grid-cols-2 gap-3">
                       <div className="bg-white p-3 rounded-xl border border-slate-100">
                         <Clock className="h-4 w-4 text-primary mb-1" />
-                        <p className="text-lg font-bold text-slate-800">{Math.round(bestUnit.duration)} min</p>
+                        <p className="text-lg font-bold text-slate-800">
+                          {Math.round(isSimulating ? (evaluatedUnits.find(u => u.ambulance.id === simulatingAmbulanceId)?.duration || 0) : (bestUnit?.duration || 0))} min
+                        </p>
                         <p className="text-[9px] text-slate-400 font-bold uppercase">Tiempo Real</p>
                       </div>
                       <div className="bg-white p-3 rounded-xl border border-slate-100">
                         <Ruler className="h-4 w-4 text-primary mb-1" />
-                        <p className="text-lg font-bold text-slate-800">{bestUnit.distance.toFixed(1)} km</p>
+                        <p className="text-lg font-bold text-slate-800">
+                          {(isSimulating ? (evaluatedUnits.find(u => u.ambulance.id === simulatingAmbulanceId)?.distance || 0) : (bestUnit?.distance || 0)).toFixed(1)} km
+                        </p>
                         <p className="text-[9px] text-slate-400 font-bold uppercase">Por calle</p>
                       </div>
                     </div>
                   </div>
 
-                  {/* Comparativa de Evaluación */}
+                  {/* Comparativa de Evaluación (Solo antes de simular) */}
                   {!isSimulating && evaluatedUnits.length > 1 && (
                     <div className="space-y-3">
                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                        <ListChecks className="h-3 w-3" /> Unidades Evaluadas
+                        <ListChecks className="h-3 w-3" /> Evaluación de Unidades
                       </p>
                       <div className="space-y-2">
                         {evaluatedUnits.map((unit, idx) => (
@@ -401,23 +422,12 @@ export default function DispatchMapPage() {
                             </div>
                             <div className="text-right">
                               <span className="text-xs font-bold text-slate-800">{Math.round(unit.duration)} min</span>
-                              <p className="text-[9px] text-slate-400">{unit.distance.toFixed(1)} km</p>
                             </div>
                           </div>
                         ))}
                       </div>
                     </div>
                   )}
-
-                  <div className="pt-4 border-t space-y-3">
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                      <Info className="h-3 w-3" /> Detalles Incidente
-                    </p>
-                    <div className="p-3 bg-slate-50 rounded-xl text-xs space-y-1">
-                      <p className="font-bold text-slate-700">ID: {currentIncident.id}</p>
-                      <p className="text-slate-600 truncate">{currentIncident.direccion}</p>
-                    </div>
-                  </div>
                 </div>
               )}
             </CardContent>
@@ -425,7 +435,7 @@ export default function DispatchMapPage() {
 
           <div className="p-4 bg-slate-50 border-t space-y-2">
              <Button 
-                disabled={!bestUnit || isCalculating || isSimulating}
+                disabled={(!bestUnit && !isSimulating) || isCalculating || isSimulating}
                 onClick={handleConfirmDispatch}
                 className="w-full rounded-full bg-primary shadow-lg border-none py-6 font-bold flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50"
               >
