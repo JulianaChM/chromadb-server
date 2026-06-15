@@ -49,6 +49,9 @@ export default function RegistroIncidentePage() {
       });
 
       const data = await response.json();
+      console.log('Respuesta completa de n8n:', data);
+      console.log('Ambulancia recibida:', data.ambulancia);
+      console.log('ID de ambulancia:', data.ambulancia?.id || data.ambulancia?._id);
 
       if (data.ok === true) {
         // Guardamos la información de la ambulancia. Si es un objeto, lo manejamos en el render.
@@ -59,6 +62,7 @@ export default function RegistroIncidentePage() {
           await updateDoc(ambulanciaRef, {
             estado: 'OCUPADA'
           });
+          console.log('Ambulancia actualizada a OCUPADA con ID:', data.ambulancia.id);
         }
         setStatus('success');
       } else if (data.ok === false) {

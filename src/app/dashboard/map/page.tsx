@@ -6,13 +6,15 @@ import dynamic from 'next/dynamic';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Info, CheckCircle2, RefreshCw, GitFork, ListChecks, MapPin, AlertCircle } from 'lucide-react';
+import { Info, CheckCircle2, RefreshCw, GitFork, ListChecks, MapPin, AlertCircle, Loader2 } from 'lucide-react';
 import { findBestRoute, Point, RouteResult } from '@/lib/a-star';
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { mockEmergencies, mockHospitals } from "@/app/lib/mock-data";
+import { mockEmergencies } from "@/app/lib/mock-data";
+import { db, useCollection } from '@/firebase';
+import { collection } from 'firebase/firestore';
 
-// Importación dinámica de Leaflet para evitar errores de SSR en Next.js
+// Importación dinámica de Leaflet para evitar errores de SSR
 const MapContainer = dynamic(
   () => import('react-leaflet').then((mod) => mod.MapContainer),
   { ssr: false }
@@ -34,11 +36,9 @@ const Popup = dynamic(
   { ssr: false }
 );
 
-// Centro de Manizales, Colombia
 const CENTER_LAT = 5.0689;
 const CENTER_LNG = -75.5174;
 
-// Función para mapear puntos de A* a coordenadas reales (Simulado para prototipado)
 const mapPointToLatLng = (p: Point): [number, number] => {
   const scale = 0.0005;
   return [CENTER_LAT + (p.y - 20) * scale, CENTER_LNG + (p.x - 20) * scale];
@@ -50,8 +50,9 @@ export default function DispatchMapPage() {
   const [isCalculating, setIsCalculating] = useState(false);
   const [leafletIcons, setLeafletIcons] = useState<any>(null);
 
-  // TODO: Implementar fetching real desde Firestore para emergencias y hospitales
-  // const { data: emergencies } = useCollection(collection(db, 'emergencies'));
+  // Consulta real a Firestore para hospitales
+  const hospitalsRef = useMemo(() => collection(db, 'hospitals'), []);
+  const { data: hospitals, loading: hospitalsLoading } = useCollection(hospitalsRef);
 
   useEffect(() => {
     import('leaflet').then((L) => {
@@ -77,7 +78,6 @@ export default function DispatchMapPage() {
     });
   }, []);
 
-  // Coordenadas simuladas de ejemplo
   const startPos: Point = { x: 10, y: 10 };
   const endPos: Point = { x: 45, y: 32 };
 
@@ -103,7 +103,6 @@ export default function DispatchMapPage() {
 
   return (
     <div className="flex flex-col lg:flex-row gap-6 h-[calc(100vh-10rem)] animate-in fade-in duration-700">
-      {/* Visualización del Mapa Interactivo */}
       <div className="flex-1 relative bg-slate-100 rounded-3xl overflow-hidden border-4 border-white shadow-inner shadow-slate-300 z-10">
         <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
         
@@ -122,9 +121,28 @@ export default function DispatchMapPage() {
               <Marker position={mapPointToLatLng(startPos)} icon={leafletIcons.ambulance}>
                 <Popup>Origen (Ambulancia / Incidente)</Popup>
               </Marker>
-              <Marker position={mapPointToLatLng(endPos)} icon={leafletIcons.hospital}>
-                <Popup>Destino (Hospital Seleccionado)</Popup>
-              </Marker>
+              
+              {/* Renderizado dinámico de hospitales desde Firestore */}
+              {hospitals?.map((hospital: any) => (
+                <Marker 
+                  key={hospital.id} 
+                  position={[hospital.coordinates?.latitude || CENTER_LAT, hospital.coordinates?.longitude || CENTER_LNG]} 
+                  icon={leafletIcons.hospital}
+                >
+                  <Popup>
+                    <div className="p-1 space-y-1">
+                      <p className="font-bold text-slate-900">{hospital.name}</p>
+                      <p className="text-xs text-slate-500">{hospital.address}</p>
+                      <div className="pt-2 border-t mt-2">
+                        <p className="text-[10px] font-bold text-primary uppercase">Capacidad Disponible</p>
+                        <p className="text-sm font-bold">
+                          {(hospital.capacity || 0) - (hospital.occupancyCurrent || 0)} camas
+                        </p>
+                      </div>
+                    </div>
+                  </Popup>
+                </Marker>
+              ))}
             </>
           )}
 
@@ -140,7 +158,8 @@ export default function DispatchMapPage() {
           <Card className="shadow-2xl border-none rounded-2xl bg-white/95 backdrop-blur">
             <CardHeader className="p-4">
               <CardTitle className="text-sm font-bold flex items-center gap-2">
-                <AlertCircle className="h-4 w-4 text-primary" /> Seleccionar Emergencia
+                {hospitalsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <AlertCircle className="h-4 w-4 text-primary" />}
+                Seleccionar Emergencia
               </CardTitle>
             </CardHeader>
             <CardContent className="p-4 pt-0">
@@ -161,7 +180,6 @@ export default function DispatchMapPage() {
         </div>
       </div>
 
-      {/* Panel de Despacho y Algoritmo */}
       <div className="w-full lg:w-96 flex flex-col gap-4">
         <Card className="border-none shadow-xl rounded-3xl overflow-hidden flex flex-col flex-1">
           <CardHeader className="bg-slate-50 border-b">
