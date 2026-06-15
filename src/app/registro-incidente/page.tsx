@@ -107,6 +107,7 @@ export default function RegistroIncidentePage() {
         tipo_emergencia: formData.tipo_emergencia,
         prioridad: formData.prioridad,
         nombre_paciente: formData.nombre_paciente,
+        edad
         direccion: formData.direccion,
         lat: latitude,
         lng: longitude

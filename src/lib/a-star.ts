@@ -1,100 +1,127 @@
 /**
- * @fileOverview Implementación del algoritmo A* para encontrar la mejor ruta.
- * Utilizado para calcular el camino óptimo hacia el hospital.
+ * @fileOverview Implementación del algoritmo A* para el espacio de estados de despacho.
+ * Estado: Ambulancia -> Incidente -> Hospital
  */
 
-export interface Point {
-  x: number;
-  y: number;
+export interface SearchNode {
+  id: string;
+  type: 'ambulance' | 'incident' | 'hospital';
+  lat: number;
+  lng: number;
+  g: number; // Costo acumulado
+  h: number; // Heurística
+  f: number; // g + h
+  parent: SearchNode | null;
+  ref: any; // Referencia al objeto original (Ambulancia o Hospital)
 }
 
-export interface RouteResult {
-  path: Point[];
-  cost: number;
-  estimatedTimeMinutes: number;
+function getEuclideanDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  return Math.sqrt(Math.pow(lat2 - lat1, 2) + Math.pow(lng2 - lng1, 2));
 }
 
-class Node {
-  constructor(
-    public x: number,
-    public y: number,
-    public g: number = 0,
-    public h: number = 0,
-    public parent: Node | null = null
-  ) {}
+export function findBestDispatchAStar(ambulancias: any[], incidente: any, hospitales: any[]) {
+  const startTime = performance.now();
+  let nodosExplorados = 0;
 
-  get f(): number {
-    return this.g + this.h;
+  if (!incidente || ambulancias.length === 0 || hospitales.length === 0) {
+    return null;
   }
-}
 
-/**
- * Calcula la distancia Manhattan como heurística.
- */
-function heuristic(a: Point, b: Point): number {
-  return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
-}
+  // Hospitales con capacidad
+  const validHospitals = hospitales.filter(h => h.capacidad_disponible > 0);
+  if (validHospitals.length === 0) return null;
 
-/**
- * Algoritmo A* simplificado para una rejilla de navegación.
- * En una implementación real, esto usaría coordenadas geográficas y grafos de calles.
- */
-export function findBestRoute(start: Point, end: Point): RouteResult {
-  const openList: Node[] = [new Node(start.x, start.y, 0, heuristic(start, end))];
-  const closedList: Node[] = [];
+  // Heurística auxiliar: distancia del incidente al hospital más cercano
+  const minIncidentToHosp = Math.min(
+    ...validHospitals.map(h => getEuclideanDistance(incidente.lat, incidente.lng, h.lat, h.lng))
+  );
 
-  while (openList.length > 0) {
-    // Obtener nodo con menor F
-    let currentIndex = 0;
-    for (let i = 0; i < openList.length; i++) {
-      if (openList[i].f < openList[currentIndex].f) {
-        currentIndex = i;
-      }
-    }
-    const currentNode = openList[currentIndex];
+  // Frontera (Priority Queue simplificada)
+  let openSet: SearchNode[] = [];
 
-    // Si llegamos al final
-    if (currentNode.x === end.x && currentNode.y === end.y) {
-      const path: Point[] = [];
-      let temp: Node | null = currentNode;
-      while (temp !== null) {
-        path.push({ x: temp.x, y: temp.y });
-        temp = temp.parent;
-      }
-      return {
-        path: path.reverse(),
-        cost: currentNode.g,
-        estimatedTimeMinutes: Math.round(currentNode.g * 1.5), // Mock factor
+  // Paso 1: Inicializar con ambulancias disponibles
+  ambulancias.forEach(amb => {
+    const distToInc = getEuclideanDistance(amb.lat, amb.lng, incidente.lat, incidente.lng);
+    const h = distToInc + minIncidentToHosp;
+    openSet.push({
+      id: amb.id,
+      type: 'ambulance',
+      lat: amb.lat,
+      lng: amb.lng,
+      g: 0,
+      h: h,
+      f: h,
+      parent: null,
+      ref: amb
+    });
+  });
+
+  let bestSolution: SearchNode | null = null;
+
+  while (openSet.length > 0) {
+    // Ordenar por F (menor a mayor)
+    openSet.sort((a, b) => a.f - b.f);
+    const current = openSet.shift()!;
+    nodosExplorados++;
+
+    // Si estamos en una ambulancia, el siguiente paso es el incidente
+    if (current.type === 'ambulance') {
+      const distToInc = getEuclideanDistance(current.lat, current.lng, incidente.lat, incidente.lng);
+      const incidentNode: SearchNode = {
+        id: 'incident-node',
+        type: 'incident',
+        lat: incidente.lat,
+        lng: incidente.lng,
+        g: current.g + distToInc,
+        h: minIncidentToHosp,
+        f: (current.g + distToInc) + minIncidentToHosp,
+        parent: current,
+        ref: incidente
       };
+      openSet.push(incidentNode);
+    } 
+    // Si estamos en el incidente, expandir a todos los hospitales válidos
+    else if (current.type === 'incident') {
+      validHospitals.forEach(hosp => {
+        const distToHosp = getEuclideanDistance(current.lat, current.lng, hosp.lat, hosp.lng);
+        const hospitalNode: SearchNode = {
+          id: hosp.id,
+          type: 'hospital',
+          lat: hosp.lat,
+          lng: hosp.lng,
+          g: current.g + distToHosp,
+          h: 0,
+          f: current.g + distToHosp,
+          parent: current,
+          ref: hosp
+        };
+        openSet.push(hospitalNode);
+      });
     }
-
-    // Mover de open a closed
-    openList.splice(currentIndex, 1);
-    closedList.push(currentNode);
-
-    // Vecinos (4 direcciones)
-    const neighbors = [
-      { x: 0, y: 1 }, { x: 0, y: -1 }, { x: 1, y: 0 }, { x: -1, y: 0 }
-    ];
-
-    for (const move of neighbors) {
-      const nx = currentNode.x + move.x;
-      const ny = currentNode.y + move.y;
-
-      if (closedList.find(n => n.x === nx && n.y === ny)) continue;
-
-      const gScore = currentNode.g + 1;
-      let neighborNode = openList.find(n => n.x === nx && n.y === ny);
-
-      if (!neighborNode) {
-        neighborNode = new Node(nx, ny, gScore, heuristic({ x: nx, y: ny }, end), currentNode);
-        openList.push(neighborNode);
-      } else if (gScore < neighborNode.g) {
-        neighborNode.g = gScore;
-        neighborNode.parent = currentNode;
+    // Si llegamos a un hospital, hemos encontrado una meta
+    else if (current.type === 'hospital') {
+      if (!bestSolution || current.g < bestSolution.g) {
+        bestSolution = current;
       }
+      // Como es A* y los costos son positivos, la primera meta encontrada con el menor F es la óptima
+      break; 
     }
   }
 
-  return { path: [], cost: 0, estimatedTimeMinutes: 0 };
+  const endTime = performance.now();
+
+  if (bestSolution) {
+    const hospitalElegido = bestSolution.ref;
+    const ambulanciaElegida = bestSolution.parent?.parent?.ref;
+
+    return {
+      ambulanciaElegida,
+      hospitalElegido,
+      costoTotal: bestSolution.g,
+      nodosExplorados,
+      tiempoEjecucion: endTime - startTime
+    };
+  }
+
+  return null;
 }
