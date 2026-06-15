@@ -57,12 +57,19 @@ export default function DispatchMapPage() {
   // Carga de iconos de Leaflet
   useEffect(() => {
     import('leaflet').then((L) => {
-      const emergencyIcon = L.divIcon({
-        html: `<div style="background-color: #1565C0; padding: 8px; border-radius: 50%; border: 3px solid white; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);">
-                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s-8-4.5-8-11.8A8 8 0 0 1 12 3a8 8 0 0 1 8 7.2c0 7.3-8 11.8-8 11.8z"/><circle cx="12" cy="10" r="3"/></svg>
-               </div>`,
-        className: '', iconSize: [40, 40], iconAnchor: [20, 20],
-      });
+      const incidentIcon = (status: string) => {
+        let color = "#1565C0"; // PENDIENTE (Azul)
+        const s = status?.toUpperCase();
+        if (s === 'EN_RUTA') color = "#eab308"; // EN_RUTA (Amarillo)
+        if (s === 'EN_PROCESO') color = "#ef4444"; // EN_PROCESO (Rojo)
+        
+        return L.divIcon({
+          html: `<div style="background-color: ${color}; padding: 8px; border-radius: 50%; border: 3px solid white; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); display: flex; align-items: center; justify-content: center;">
+                   <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s-8-4.5-8-11.8A8 8 0 0 1 12 3a8 8 0 0 1 8 7.2c0 7.3-8 11.8-8 11.8z"/><circle cx="12" cy="10" r="3"/></svg>
+                 </div>`,
+          className: '', iconSize: [40, 40], iconAnchor: [20, 20],
+        });
+      };
 
       const hospitalIcon = (name: string, disponible: boolean) => L.divIcon({
         html: `<div class="flex flex-col items-center">
@@ -89,7 +96,7 @@ export default function DispatchMapPage() {
         });
       };
 
-      setLeafletIcons({ emergency: emergencyIcon, hospital: hospitalIcon, ambulance: ambulanceIcon });
+      setLeafletIcons({ incident: incidentIcon, hospital: hospitalIcon, ambulance: ambulanceIcon });
     });
   }, []);
 
@@ -174,8 +181,7 @@ export default function DispatchMapPage() {
       const incRef = doc(db, 'incidentes', incidentId);
 
       // FASE 1: ACTUALIZACIÓN INICIAL - Ambulancia e Incidente "EN_RUTA"
-      // Se registran ID y Placa de la ambulancia en el incidente
-      console.log(`[SIM] Fase 1: Actualizando estados a EN_RUTA y asignando ambulancia`);
+      console.log(`[SIM] Fase 1: Actualizando estados a EN_RUTA`);
       await updateDoc(ambRef, { estado: 'EN_RUTA' });
       await updateDoc(incRef, { 
         estado: 'EN_RUTA',
@@ -349,9 +355,21 @@ export default function DispatchMapPage() {
                 );
               })}
 
-              {currentIncident && !isSimulating && (
-                <Marker position={[currentIncident.lat, currentIncident.lng]} icon={leafletIcons.emergency} />
-              )}
+              {incidentes?.filter((inc: any) => inc.estado !== 'COMPLETADO').map((inc: any) => (
+                <Marker 
+                  key={inc.id} 
+                  position={[inc.lat, inc.lng]} 
+                  icon={leafletIcons.incident(inc.estado)}
+                >
+                  <Popup>
+                    <div className="p-2 space-y-1">
+                      <p className="font-bold text-slate-800">{inc.tipo_emergencia || 'Emergencia'}</p>
+                      <p className="text-xs">Estado: <span className="font-medium">{inc.estado}</span></p>
+                      <p className="text-xs italic text-slate-500">{inc.descripcion}</p>
+                    </div>
+                  </Popup>
+                </Marker>
+              ))}
 
               {activeSimulationPoints.length > 0 && (
                 <Polyline 
