@@ -76,7 +76,7 @@ export default function DispatchMapPage() {
       const ambulanceIcon = (status: string) => {
         let color = "#22c55e"; // Disponible
         const s = status?.toUpperCase();
-        if (s === 'EN RUTA' || s === 'EN_RUTA' || s === 'DESPACHADA') color = "#eab308"; // Amarillo
+        if (s === 'EN_RUTA' || s === 'EN RUTA' || s === 'DESPACHADA') color = "#eab308"; // Amarillo
         if (s === 'OCUPADA') color = "#ef4444"; // Rojo
         return L.divIcon({
           html: `<div style="background-color: ${color}; padding: 6px; border-radius: 8px; border: 2px solid white; box-shadow: 0 4px 6px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center;">
@@ -160,11 +160,21 @@ export default function DispatchMapPage() {
 
   // Función para manejar la simulación de despacho progresiva
   const handleConfirmDispatch = async () => {
-    if (!bestUnit || !selectedIncidentId || isSimulating) return;
+    console.log("[SIM] Intento de despacho iniciado");
+
+    if (!bestUnit || !selectedIncidentId || isSimulating || !currentIncident) {
+      console.warn("[SIM] Abortado: Falta unidad, incidente o ya hay simulación activa");
+      return;
+    }
 
     const ambulanceId = bestUnit.ambulance.id;
-    const routePoints = [...bestUnit.points]; // Clonamos los puntos para la simulación
+    const ambulancePlaca = bestUnit.ambulance.placa;
+    const routePoints = [...bestUnit.points];
     const destination = [currentIncident.lat, currentIncident.lng];
+
+    console.log("[SIM] Incidente seleccionado:", selectedIncidentId);
+    console.log("[SIM] Ambulancia elegida:", ambulancePlaca, "(ID:", ambulanceId, ")");
+    console.log("[SIM] Ruta OSRM obtenida con", routePoints.length, "puntos");
 
     // Iniciamos estados locales para la UI
     setIsSimulating(true);
@@ -172,12 +182,17 @@ export default function DispatchMapPage() {
     setSimulatedCoords(routePoints[0]);
     setActiveSimulationPoints(routePoints);
     
-    // 1. Actualizar estado a EN RUTA en Firestore inmediatamente
     try {
       const ambRef = doc(db, 'ambulancias', ambulanceId);
-      updateDoc(ambRef, { estado: 'EN_RUTA' });
+      
+      // 1. Actualizar estado a EN_RUTA en Firestore
+      console.log("[SIM] Intentando cambiar estado a EN_RUTA en Firestore...");
+      updateDoc(ambRef, { estado: 'EN_RUTA' })
+        .then(() => console.log("[SIM] Estado cambiado a EN_RUTA en Firestore exitosamente"))
+        .catch(err => console.error("[SIM] Error al actualizar Firestore:", err));
 
       // 2. Iniciar animación local
+      console.log("[SIM] Animación iniciada");
       let currentStep = 0;
       const totalSteps = routePoints.length;
       
@@ -188,12 +203,14 @@ export default function DispatchMapPage() {
         } else {
           // 3. Llegada al destino: Actualización final
           clearInterval(animationInterval);
+          console.log("[SIM] Llegada al incidente. Actualizando estado a OCUPADA...");
           
           await updateDoc(ambRef, { 
             estado: 'OCUPADA',
             lat: destination[0],
             lng: destination[1]
           });
+          console.log("[SIM] Firestore actualizado a OCUPADA en coordenadas del incidente");
 
           // Limpiar simulación después de una breve pausa de éxito
           setTimeout(() => {
@@ -204,12 +221,13 @@ export default function DispatchMapPage() {
             setSelectedIncidentId(null);
             setBestUnit(null);
             setEvaluatedUnits([]);
+            console.log("[SIM] Simulación finalizada y estados reseteados");
           }, 1500);
         }
-      }, 80); // Velocidad ajustada para visualización clara
+      }, 80);
 
     } catch (error) {
-      console.error("Error en simulación:", error);
+      console.error("[SIM] Error crítico en el proceso de simulación:", error);
       setIsSimulating(false);
       setSimulatingAmbulanceId(null);
     }
