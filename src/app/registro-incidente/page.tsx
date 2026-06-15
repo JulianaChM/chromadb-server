@@ -23,7 +23,7 @@ export default function RegistroIncidentePage() {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [status, setStatus] = useState<'idle' | 'success' | 'no-ambulance' | 'error'>('idle');
-  const [assignedAmbulance, setAssignedAmbulance] = useState('');
+  const [assignedAmbulance, setAssignedAmbulance] = useState<any>('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -50,6 +50,7 @@ export default function RegistroIncidentePage() {
       const data = await response.json();
 
       if (data.ok === true) {
+        // Guardamos la información de la ambulancia. Si es un objeto, lo manejamos en el render.
         setAssignedAmbulance(data.ambulancia || '[Asignando...]');
         setStatus('success');
       } else if (data.ok === false) {
@@ -79,6 +80,15 @@ export default function RegistroIncidentePage() {
 
   const isFormValid = formData.descripcion && formData.tipo_emergencia && formData.prioridad && formData.direccion;
 
+  // Función para renderizar el ID o Placa de forma segura
+  const renderAmbulanceInfo = () => {
+    if (!assignedAmbulance) return '[Asignando...]';
+    if (typeof assignedAmbulance === 'object') {
+      return assignedAmbulance.placa || assignedAmbulance._id || JSON.stringify(assignedAmbulance);
+    }
+    return assignedAmbulance;
+  };
+
   if (status === 'success') {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
@@ -90,7 +100,9 @@ export default function RegistroIncidentePage() {
               </div>
             </div>
             <h2 className="text-2xl font-headline font-bold text-green-800">Emergencia registrada</h2>
-            <p className="text-green-700">Ambulancia <span className="font-bold">{assignedAmbulance}</span> asignada.</p>
+            <p className="text-green-700">
+              Ambulancia <span className="font-bold">{renderAmbulanceInfo()}</span> asignada.
+            </p>
             <Button onClick={resetForm} className="w-full rounded-full bg-green-600 hover:bg-green-700">
               Registrar otra emergencia
             </Button>
