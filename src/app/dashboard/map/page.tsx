@@ -6,7 +6,7 @@ import dynamic from 'next/dynamic';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Info, CheckCircle2, RefreshCw, GitFork, ListChecks, MapPin, AlertCircle, Loader2, Building2 } from 'lucide-react';
+import { Info, CheckCircle2, RefreshCw, GitFork, ListChecks, MapPin, AlertCircle, Loader2, Building2, AlertTriangle } from 'lucide-react';
 import { findBestRoute, Point, RouteResult } from '@/lib/a-star';
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -51,11 +51,35 @@ export default function DispatchMapPage() {
   const [isCalculating, setIsCalculating] = useState(false);
   const [leafletIcons, setLeafletIcons] = useState<any>(null);
 
-  // Consulta real a Firestore para hospitales
-  const hospitalsRef = useMemo(() => collection(db, 'hospitals'), []);
+  // Diagnóstico de Firestore
+  const collectionPath = 'hospitals';
+  const hospitalsRef = useMemo(() => {
+    console.log(`[Firestore Diagnosis] Creando referencia a la colección: "${collectionPath}"`);
+    return collection(db, collectionPath);
+  }, []);
+
   const { data: hospitals, loading: hospitalsLoading, error: hospitalsError } = useCollection(hospitalsRef);
 
-  // Helpers para extraer datos de hospital
+  // Logs de depuración cada vez que cambian los datos de Firestore
+  useEffect(() => {
+    if (!hospitalsLoading) {
+      if (hospitalsError) {
+        console.error(`[Firestore Error] Error al obtener hospitales de "${collectionPath}":`, hospitalsError);
+      } else {
+        console.log(`[Firestore Success] Documentos recibidos de "${collectionPath}":`, hospitals?.length || 0);
+        if (hospitals && hospitals.length > 0) {
+          console.table(hospitals.map(h => ({ 
+            id: h.id, 
+            nombre: h.name || h.nombre || 'N/A', 
+            hasCoords: !!(h.coordinates || h.latitude || h.lat) 
+          })));
+        } else {
+          console.warn(`[Firestore Warning] La colección "${collectionPath}" existe pero está vacía o no tienes permisos de lectura.`);
+        }
+      }
+    }
+  }, [hospitals, hospitalsLoading, hospitalsError]);
+
   const getHospitalCoords = (hospital: any): [number, number] | null => {
     const lat = hospital.coordinates?.latitude ?? hospital.latitude ?? hospital.lat;
     const lng = hospital.coordinates?.longitude ?? hospital.longitude ?? hospital.lng;
@@ -68,18 +92,16 @@ export default function DispatchMapPage() {
 
   const getHospitalName = (hospital: any) => hospital.name ?? hospital.nombre ?? 'Hospital sin nombre';
 
-  // Efecto para depuración de coordenadas en consola
   useEffect(() => {
     if (hospitals) {
       hospitals.forEach((h: any) => {
         if (!getHospitalCoords(h)) {
-          console.warn(`[CodeBlueAI] El hospital con ID: ${h.id} no tiene coordenadas válidas y no se mostrará en el mapa.`, h);
+          console.warn(`[CodeBlueAI] El hospital con ID: ${h.id} no tiene coordenadas válidas.`, h);
         }
       });
     }
   }, [hospitals]);
 
-  // Contadores para el panel de telemetría
   const stats = useMemo(() => {
     const total = hospitals?.length || 0;
     const rendered = hospitals?.filter(h => getHospitalCoords(h)).length || 0;
@@ -120,7 +142,7 @@ export default function DispatchMapPage() {
   
   const getEndPos = (emergencyId: string | null): Point => {
     if (!emergencyId) return { x: 45, y: 32 };
-    const seed = emergencyId.charCodeAt(emergencyId.length - 1);
+    const seed = (emergencyId || "").split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
     return { 
       x: 20 + (seed % 30), 
       y: 15 + (seed % 25) 
@@ -245,10 +267,11 @@ export default function DispatchMapPage() {
                     <Building2 className="h-3 w-3" />
                     Telemetría Firestore
                   </div>
-                  <Badge variant="outline" className="text-[10px] font-bold">
-                    Real-time
+                  <Badge variant={hospitalsError ? "destructive" : "outline"} className="text-[10px] font-bold">
+                    {hospitalsLoading ? 'Cargando...' : 'Real-time'}
                   </Badge>
                 </div>
+                
                 <div className="grid grid-cols-2 gap-2 mt-1">
                   <div className="bg-slate-50 p-2 rounded-lg border">
                     <p className="text-[10px] text-slate-400 font-bold uppercase">Cargados</p>
@@ -259,7 +282,21 @@ export default function DispatchMapPage() {
                     <p className="text-sm font-bold text-green-600">{stats.rendered}</p>
                   </div>
                 </div>
-                {hospitalsError && <p className="text-[10px] text-destructive mt-1 font-medium">Error de conexión con Firestore</p>}
+
+                {hospitalsError && (
+                  <div className="mt-2 p-2 bg-destructive/10 rounded-lg border border-destructive/20 flex items-start gap-2">
+                    <AlertTriangle className="h-3 w-3 text-destructive shrink-0 mt-0.5" />
+                    <p className="text-[9px] text-destructive leading-tight font-medium">
+                      Error: {hospitalsError.message}
+                    </p>
+                  </div>
+                )}
+
+                {!hospitalsLoading && stats.total === 0 && !hospitalsError && (
+                  <p className="text-[10px] text-amber-600 mt-1 font-medium italic">
+                    * Colección "{collectionPath}" vacía.
+                  </p>
+                )}
              </div>
           </Card>
         </div>
