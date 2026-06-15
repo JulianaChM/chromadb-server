@@ -55,6 +55,37 @@ export default function DispatchMapPage() {
   const hospitalsRef = useMemo(() => collection(db, 'hospitals'), []);
   const { data: hospitals, loading: hospitalsLoading, error: hospitalsError } = useCollection(hospitalsRef);
 
+  // Helpers para extraer datos de hospital
+  const getHospitalCoords = (hospital: any): [number, number] | null => {
+    const lat = hospital.coordinates?.latitude ?? hospital.latitude ?? hospital.lat;
+    const lng = hospital.coordinates?.longitude ?? hospital.longitude ?? hospital.lng;
+    
+    if (typeof lat === 'number' && typeof lng === 'number') {
+      return [lat, lng];
+    }
+    return null;
+  };
+
+  const getHospitalName = (hospital: any) => hospital.name ?? hospital.nombre ?? 'Hospital sin nombre';
+
+  // Efecto para depuración de coordenadas en consola
+  useEffect(() => {
+    if (hospitals) {
+      hospitals.forEach((h: any) => {
+        if (!getHospitalCoords(h)) {
+          console.warn(`[CodeBlueAI] El hospital con ID: ${h.id} no tiene coordenadas válidas y no se mostrará en el mapa.`, h);
+        }
+      });
+    }
+  }, [hospitals]);
+
+  // Contadores para el panel de telemetría
+  const stats = useMemo(() => {
+    const total = hospitals?.length || 0;
+    const rendered = hospitals?.filter(h => getHospitalCoords(h)).length || 0;
+    return { total, rendered };
+  }, [hospitals]);
+
   useEffect(() => {
     import('leaflet').then((L) => {
       const ambulanceIcon = L.divIcon({
@@ -66,26 +97,29 @@ export default function DispatchMapPage() {
         iconAnchor: [20, 20],
       });
 
-      const hospitalIcon = L.divIcon({
-        html: `<div style="background-color: #D32F2F; padding: 8px; border-radius: 50%; border: 3px solid white; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);">
-                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-               </div>`,
+      const hospitalIcon = (name: string) => L.divIcon({
+        html: `
+          <div class="flex flex-col items-center">
+            <span style="background: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; border: 1px solid #D32F2F; margin-bottom: 2px; white-space: nowrap; box-shadow: 0 2px 4px rgba(0,0,0,0.1); color: #D32F2F;">
+              ${name}
+            </span>
+            <div style="background-color: #D32F2F; padding: 8px; border-radius: 50%; border: 3px solid white; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+            </div>
+          </div>`,
         className: '',
-        iconSize: [40, 40],
-        iconAnchor: [20, 20],
+        iconSize: [120, 60],
+        iconAnchor: [60, 50],
       });
 
       setLeafletIcons({ ambulance: ambulanceIcon, hospital: hospitalIcon });
     });
   }, []);
 
-  // Puntos base para el algoritmo A*
   const startPos: Point = { x: 10, y: 10 };
   
-  // Derivamos el destino de forma dinámica según la emergencia para que la ruta cambie
   const getEndPos = (emergencyId: string | null): Point => {
     if (!emergencyId) return { x: 45, y: 32 };
-    // Simulamos un destino diferente basado en el ID de la emergencia
     const seed = emergencyId.charCodeAt(emergencyId.length - 1);
     return { 
       x: 20 + (seed % 30), 
@@ -96,8 +130,6 @@ export default function DispatchMapPage() {
   const calculateAStar = () => {
     if (!selectedEmergencyId) return;
     setIsCalculating(true);
-    
-    // El algoritmo A* trabaja sobre una rejilla lógica (0-100 por ej)
     const endPos = getEndPos(selectedEmergencyId);
     
     setTimeout(() => {
@@ -118,20 +150,6 @@ export default function DispatchMapPage() {
     return route.path.map(p => mapGridPointToLatLng(p));
   }, [route]);
 
-  // Función para extraer coordenadas de forma segura independientemente del nombre del campo
-  const getHospitalCoords = (hospital: any): [number, number] | null => {
-    const lat = hospital.coordinates?.latitude ?? hospital.latitude ?? hospital.lat;
-    const lng = hospital.coordinates?.longitude ?? hospital.longitude ?? hospital.lng;
-    
-    if (typeof lat === 'number' && typeof lng === 'number') {
-      return [lat, lng];
-    }
-    return null;
-  };
-
-  // Función para obtener el nombre del hospital (soporta name o nombre)
-  const getHospitalName = (hospital: any) => hospital.name ?? hospital.nombre ?? 'Hospital sin nombre';
-
   return (
     <div className="flex flex-col lg:flex-row gap-6 h-[calc(100vh-10rem)] animate-in fade-in duration-700">
       <div className="flex-1 relative bg-slate-100 rounded-3xl overflow-hidden border-4 border-white shadow-inner shadow-slate-300 z-10">
@@ -149,16 +167,15 @@ export default function DispatchMapPage() {
           
           {leafletIcons && (
             <>
-              {/* Marcador de la Ambulancia / Origen */}
               <Marker position={mapGridPointToLatLng(startPos)} icon={leafletIcons.ambulance}>
                 <Popup>Ubicación de la Emergencia (Origen)</Popup>
               </Marker>
               
-              {/* Marcadores Dinámicos de Hospitales desde Firestore */}
               {hospitals?.map((hospital: any) => {
                 const coords = getHospitalCoords(hospital);
                 if (!coords) return null;
 
+                const name = getHospitalName(hospital);
                 const cap = hospital.capacity ?? 0;
                 const occ = hospital.occupancyCurrent ?? 0;
                 const available = cap - occ;
@@ -167,16 +184,16 @@ export default function DispatchMapPage() {
                   <Marker 
                     key={hospital.id} 
                     position={coords} 
-                    icon={leafletIcons.hospital}
+                    icon={leafletIcons.hospital(name)}
                   >
                     <Popup>
                       <div className="p-1 space-y-1 min-w-[150px]">
-                        <p className="font-bold text-slate-900 leading-tight">{getHospitalName(hospital)}</p>
+                        <p className="font-bold text-slate-900 leading-tight">{name}</p>
                         <p className="text-xs text-slate-500">{hospital.address ?? 'Sin dirección'}</p>
                         <div className="pt-2 border-t mt-2">
                           <div className="flex justify-between items-center">
                             <span className="text-[10px] font-bold text-primary uppercase">Camas Libres</span>
-                            <Badge variant={available > 10 ? "secondary" : "destructive"} className="h-4 text-[9px] px-1">
+                            <Badge variant={available > 0 ? "secondary" : "destructive"} className="h-4 text-[9px] px-1">
                               {available}
                             </Badge>
                           </div>
@@ -197,7 +214,6 @@ export default function DispatchMapPage() {
           )}
         </MapContainer>
 
-        {/* Panel de Selección flotante */}
         <div className="absolute top-6 left-6 z-[1000] w-72 space-y-3">
           <Card className="shadow-2xl border-none rounded-2xl bg-white/95 backdrop-blur">
             <CardHeader className="p-4 pb-2">
@@ -222,18 +238,29 @@ export default function DispatchMapPage() {
             </CardContent>
           </Card>
 
-          {/* Estado de la Red */}
           <Card className="shadow-xl border-none rounded-2xl bg-white/90 backdrop-blur p-3">
-             <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-xs font-bold text-slate-600">
-                  <Building2 className="h-3 w-3" />
-                  Hospitales en Red
+             <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-xs font-bold text-slate-600">
+                    <Building2 className="h-3 w-3" />
+                    Telemetría Firestore
+                  </div>
+                  <Badge variant="outline" className="text-[10px] font-bold">
+                    Real-time
+                  </Badge>
                 </div>
-                <Badge variant="outline" className="text-[10px] font-bold">
-                  {hospitalsLoading ? '...' : (hospitals?.length || 0)} centros
-                </Badge>
+                <div className="grid grid-cols-2 gap-2 mt-1">
+                  <div className="bg-slate-50 p-2 rounded-lg border">
+                    <p className="text-[10px] text-slate-400 font-bold uppercase">Cargados</p>
+                    <p className="text-sm font-bold text-primary">{stats.total}</p>
+                  </div>
+                  <div className="bg-slate-50 p-2 rounded-lg border">
+                    <p className="text-[10px] text-slate-400 font-bold uppercase">Renderizados</p>
+                    <p className="text-sm font-bold text-green-600">{stats.rendered}</p>
+                  </div>
+                </div>
+                {hospitalsError && <p className="text-[10px] text-destructive mt-1 font-medium">Error de conexión con Firestore</p>}
              </div>
-             {hospitalsError && <p className="text-[10px] text-destructive mt-1">Error de conexión con Firestore</p>}
           </Card>
         </div>
       </div>
