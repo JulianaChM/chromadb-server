@@ -6,14 +6,13 @@ import dynamic from 'next/dynamic';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Info, CheckCircle2, RefreshCw, GitFork, ListChecks, MapPin, AlertCircle, Loader2, Building2, AlertTriangle, Database, Activity } from 'lucide-react';
+import { CheckCircle2, RefreshCw, GitFork, ListChecks, MapPin, AlertCircle, Loader2 } from 'lucide-react';
 import { findBestRoute, Point, RouteResult } from '@/lib/a-star';
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { mockEmergencies } from "@/app/lib/mock-data";
 import { db, useCollection } from '@/firebase';
 import { collection } from 'firebase/firestore';
-import { firebaseConfig } from '@/firebase/config';
 
 // Importación dinámica de Leaflet para evitar errores de SSR
 const MapContainer = dynamic(
@@ -52,23 +51,9 @@ export default function DispatchMapPage() {
   const [isCalculating, setIsCalculating] = useState(false);
   const [leafletIcons, setLeafletIcons] = useState<any>(null);
 
-  // Diagnóstico de Firestore: Usando la colección 'hospitales' reportada
-  const collectionPath = 'hospitales';
-  const hospitalesRef = useMemo(() => {
-    return collection(db, collectionPath);
-  }, []);
-
-  const { data: hospitales, loading: hospitalesLoading, error: hospitalesError } = useCollection(hospitalesRef);
-
-  const stats = useMemo(() => {
-    const total = hospitales?.length || 0;
-    const rendered = hospitales?.filter((h: any) => {
-      const lat = h.coordinates?.latitude ?? h.latitude ?? h.lat;
-      const lng = h.coordinates?.longitude ?? h.longitude ?? h.lng;
-      return typeof lat === 'number' && typeof lng === 'number';
-    }).length || 0;
-    return { total, rendered };
-  }, [hospitales]);
+  // Consulta a la colección real de Firestore: 'hospitales'
+  const hospitalesRef = useMemo(() => collection(db, 'hospitales'), []);
+  const { data: hospitales, loading: hospitalesLoading } = useCollection(hospitalesRef);
 
   const getHospitalCoords = (hospital: any): [number, number] | null => {
     const lat = hospital.coordinates?.latitude ?? hospital.latitude ?? hospital.lat;
@@ -80,7 +65,7 @@ export default function DispatchMapPage() {
     return null;
   };
 
-  const getHospitalName = (hospital: any) => hospital.name ?? hospital.nombre ?? 'Hospital sin nombre';
+  const getHospitalName = (hospital: any) => hospital.nombre ?? hospital.name ?? 'Hospital sin nombre';
 
   useEffect(() => {
     import('leaflet').then((L) => {
@@ -161,6 +146,12 @@ export default function DispatchMapPage() {
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
           
+          {hospitalesLoading && (
+            <div className="absolute inset-0 z-[2000] bg-white/50 backdrop-blur-sm flex items-center justify-center">
+              <Loader2 className="h-10 w-10 text-primary animate-spin" />
+            </div>
+          )}
+
           {leafletIcons && (
             <>
               <Marker position={mapGridPointToLatLng(startPos)} icon={leafletIcons.ambulance}>
@@ -172,8 +163,8 @@ export default function DispatchMapPage() {
                 if (!coords) return null;
 
                 const name = getHospitalName(hospital);
-                const cap = hospital.capacity ?? hospital.capacidad ?? 0;
-                const occ = hospital.occupancyCurrent ?? hospital.ocupacion ?? 0;
+                const cap = hospital.capacidad ?? hospital.capacity ?? 0;
+                const occ = hospital.ocupacion ?? hospital.occupancyCurrent ?? 0;
                 const available = cap - occ;
 
                 return (
@@ -185,7 +176,7 @@ export default function DispatchMapPage() {
                     <Popup>
                       <div className="p-1 space-y-1 min-w-[150px]">
                         <p className="font-bold text-slate-900 leading-tight">{name}</p>
-                        <p className="text-xs text-slate-500">{hospital.address ?? hospital.direccion ?? 'Sin dirección'}</p>
+                        <p className="text-xs text-slate-500">{hospital.direccion ?? hospital.address ?? 'Sin dirección'}</p>
                         <div className="pt-2 border-t mt-2">
                           <div className="flex justify-between items-center">
                             <span className="text-[10px] font-bold text-primary uppercase">Camas Libres</span>
@@ -232,72 +223,6 @@ export default function DispatchMapPage() {
                 </SelectContent>
               </Select>
             </CardContent>
-          </Card>
-
-          {/* PANEL DE DIAGNÓSTICO PROFUNDO */}
-          <Card className="shadow-xl border-none rounded-2xl bg-slate-900/95 text-white backdrop-blur overflow-hidden">
-             <div className="bg-primary/20 p-3 border-b border-white/10 flex items-center justify-between">
-                <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider">
-                  <Database className="h-3 w-3" />
-                  Diagnóstico Firestore
-                </div>
-                <Badge variant={hospitalesError ? "destructive" : "outline"} className="text-[9px] h-4 bg-white/10 border-white/20 text-white">
-                  {hospitalesLoading ? 'Conectando...' : 'En Línea'}
-                </Badge>
-             </div>
-             
-             <div className="p-4 space-y-4">
-                <div className="space-y-1">
-                   <p className="text-[9px] text-slate-400 font-bold uppercase">Firebase Project ID</p>
-                   <p className="text-xs font-mono text-blue-300 truncate">{firebaseConfig.projectId}</p>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                   <div className="bg-white/5 p-2 rounded-lg border border-white/10">
-                      <p className="text-[9px] text-slate-400 font-bold uppercase">Cargados</p>
-                      <p className="text-lg font-bold text-white">{stats.total}</p>
-                   </div>
-                   <div className="bg-white/5 p-2 rounded-lg border border-white/10">
-                      <p className="text-[9px] text-slate-400 font-bold uppercase">Con Coords</p>
-                      <p className="text-lg font-bold text-green-400">{stats.rendered}</p>
-                   </div>
-                </div>
-
-                <div className="space-y-1">
-                   <p className="text-[9px] text-slate-400 font-bold uppercase">Estado de Carga</p>
-                   <div className="flex items-center gap-2">
-                      <div className={`h-2 w-2 rounded-full ${hospitalesLoading ? 'bg-amber-400 animate-pulse' : 'bg-green-400'}`}></div>
-                      <span className="text-xs">{hospitalesLoading ? 'Obteniendo documentos...' : 'Snapshot activo'}</span>
-                   </div>
-                </div>
-
-                {hospitalesError && (
-                  <div className="p-2 bg-destructive/20 rounded-lg border border-destructive/30 flex items-start gap-2">
-                    <AlertTriangle className="h-3 w-3 text-destructive shrink-0 mt-0.5" />
-                    <div>
-                      <p className="text-[10px] font-bold text-destructive">ERROR DETECTADO</p>
-                      <p className="text-[9px] text-slate-300 leading-tight">{hospitalesError.message}</p>
-                    </div>
-                  </div>
-                )}
-
-                {!hospitalesLoading && stats.total > 0 && (
-                  <div className="pt-2 border-t border-white/10">
-                    <p className="text-[9px] text-slate-400 font-bold uppercase mb-1">Muestra de Datos (ID 1)</p>
-                    <div className="bg-black/40 p-2 rounded text-[9px] font-mono text-blue-200 overflow-x-auto whitespace-pre">
-                      {JSON.stringify(hospitales?.[0], (k,v) => k === 'id' ? v : v, 2).substring(0, 150)}...
-                    </div>
-                  </div>
-                )}
-
-                {!hospitalesLoading && stats.total === 0 && !hospitalesError && (
-                  <div className="p-2 bg-amber-500/10 rounded-lg border border-amber-500/30">
-                    <p className="text-[9px] text-amber-400 font-medium italic">
-                      * Consulta exitosa pero la colección "{collectionPath}" no devolvió documentos. Revisa que el nombre sea exacto y existan datos en la consola de Firebase.
-                    </p>
-                  </div>
-                )}
-             </div>
           </Card>
         </div>
       </div>
