@@ -39,7 +39,6 @@ const Popup = dynamic(
 const CENTER_LAT = 5.0689;
 const CENTER_LNG = -75.5174;
 
-// Función para mapear puntos de la rejilla A* a coordenadas geográficas (simulación)
 const mapGridPointToLatLng = (p: Point): [number, number] => {
   const scale = 0.0005;
   return [CENTER_LAT + (p.y - 20) * scale, CENTER_LNG + (p.x - 20) * scale];
@@ -58,14 +57,9 @@ export default function DispatchMapPage() {
   const ambulanciasRef = useMemo(() => collection(db, 'ambulancias'), []);
   const { data: ambulancias, loading: ambulanciasLoading } = useCollection(ambulanciasRef);
 
-  // Estadísticas de carga para consola
-  useEffect(() => {
-    if (hospitales) console.log(`[Firestore] Hospitales cargados: ${hospitales.length}`);
-    if (ambulancias) console.log(`[Firestore] Ambulancias cargadas: ${ambulancias.length}`);
-  }, [hospitales, ambulancias]);
-
   // Helper para obtener coordenadas de un documento de hospital
   const getHospitalCoords = (hospital: any): [number, number] | null => {
+    // Intenta obtener lat/lng de varios formatos posibles (GeoPoint o campos individuales)
     const lat = hospital.coordinates?.latitude ?? hospital.latitude ?? hospital.lat;
     const lng = hospital.coordinates?.longitude ?? hospital.longitude ?? hospital.lng;
     
@@ -77,9 +71,26 @@ export default function DispatchMapPage() {
 
   const getHospitalName = (hospital: any) => hospital.nombre ?? hospital.name ?? 'Hospital';
 
+  // Telemetría de ambulancias en consola
+  useEffect(() => {
+    if (hospitales && ambulancias) {
+      let matched = 0;
+      let unmatched = 0;
+      ambulancias.forEach((amb: any) => {
+        const hospital = hospitales.find(h => h.id === amb.hospital_id);
+        if (hospital && getHospitalCoords(hospital)) {
+          matched++;
+        } else {
+          unmatched++;
+          console.warn(`[Ambulancia] La unidad con placa ${amb.placa} no pudo encontrar su hospital base con ID: ${amb.hospital_id}`);
+        }
+      });
+      console.log(`[Sync] Ambulancias: ${ambulancias.length} cargadas, ${matched} renderizadas, ${unmatched} fallidas.`);
+    }
+  }, [hospitales, ambulancias]);
+
   useEffect(() => {
     import('leaflet').then((L) => {
-      // Icono para la ubicación de la emergencia (Origen)
       const emergencyIcon = L.divIcon({
         html: `<div style="background-color: #1565C0; padding: 8px; border-radius: 50%; border: 3px solid white; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);">
                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s-8-4.5-8-11.8A8 8 0 0 1 12 3a8 8 0 0 1 8 7.2c0 7.3-8 11.8-8 11.8z"/><circle cx="12" cy="10" r="3"/></svg>
@@ -89,7 +100,6 @@ export default function DispatchMapPage() {
         iconAnchor: [20, 20],
       });
 
-      // Icono para hospitales (Pin Rojo con Nombre)
       const hospitalIcon = (name: string) => L.divIcon({
         html: `
           <div class="flex flex-col items-center">
@@ -105,11 +115,10 @@ export default function DispatchMapPage() {
         iconAnchor: [60, 50],
       });
 
-      // Icono para ambulancias (Forma de Vehículo)
       const ambulanceIcon = (status: string) => {
-        let color = "#22c55e"; // Disponible (Verde)
-        if (status?.toUpperCase() === 'EN RUTA') color = "#eab308"; // En Ruta (Amarillo)
-        if (status?.toUpperCase() === 'OCUPADA') color = "#ef4444"; // Ocupada (Rojo)
+        let color = "#22c55e"; // Disponible
+        if (status?.toUpperCase() === 'EN RUTA') color = "#eab308"; // Amarillo
+        if (status?.toUpperCase() === 'OCUPADA') color = "#ef4444"; // Rojo
 
         return L.divIcon({
           html: `
@@ -133,10 +142,7 @@ export default function DispatchMapPage() {
   const getEndPos = (emergencyId: string | null): Point => {
     if (!emergencyId) return { x: 45, y: 32 };
     const seed = (emergencyId || "").split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    return { 
-      x: 20 + (seed % 30), 
-      y: 15 + (seed % 25) 
-    };
+    return { x: 20 + (seed % 30), y: 15 + (seed % 25) };
   };
 
   const calculateAStar = () => {
@@ -161,15 +167,6 @@ export default function DispatchMapPage() {
     if (!route) return [];
     return route.path.map(p => mapGridPointToLatLng(p));
   }, [route]);
-
-  const getAmbulanceStatusColor = (status: string) => {
-    switch (status?.toUpperCase()) {
-      case 'DISPONIBLE': return "bg-green-100 text-green-700";
-      case 'EN RUTA': return "bg-yellow-100 text-yellow-700";
-      case 'OCUPADA': return "bg-red-100 text-red-700";
-      default: return "bg-slate-100 text-slate-700";
-    }
-  };
 
   return (
     <div className="flex flex-col lg:flex-row gap-6 h-[calc(100vh-10rem)] animate-in fade-in duration-700">
@@ -197,7 +194,7 @@ export default function DispatchMapPage() {
 
           {leafletIcons && (
             <>
-              {/* Marcador de Origen (Emergencia) */}
+              {/* Marcador de Emergencia */}
               <Marker position={mapGridPointToLatLng(startPos)} icon={leafletIcons.emergency}>
                 <Popup>Ubicación del Incidente</Popup>
               </Marker>
@@ -208,22 +205,18 @@ export default function DispatchMapPage() {
                 if (!coords) return null;
 
                 const name = getHospitalName(hospital);
-                const hasAvailability = hospital.capacidad_disponible === true;
+                const isAvailable = hospital.capacidad_disponible === true;
 
                 return (
-                  <Marker 
-                    key={hospital.id} 
-                    position={coords} 
-                    icon={leafletIcons.hospital(name)}
-                  >
+                  <Marker key={hospital.id} position={coords} icon={leafletIcons.hospital(name)}>
                     <Popup>
                       <div className="p-1 space-y-1 min-w-[150px]">
                         <p className="font-bold text-slate-900 leading-tight">{name}</p>
-                        <p className="text-xs text-slate-500">{hospital.direccion ?? hospital.address ?? 'Sin dirección'}</p>
+                        <p className="text-xs text-slate-500">{hospital.direccion || 'Sin dirección registrada'}</p>
                         <div className="pt-2 border-t mt-2 flex items-center justify-between">
                           <span className="text-[10px] font-bold text-slate-400 uppercase">Disponibilidad</span>
-                          <Badge variant={hasAvailability ? "secondary" : "destructive"} className="h-5 text-[10px] px-2 font-bold">
-                            {hasAvailability ? 'SÍ' : 'NO'}
+                          <Badge variant={isAvailable ? "secondary" : "destructive"} className="h-5 text-[10px] px-2 font-bold">
+                            {isAvailable ? 'SÍ' : 'NO'}
                           </Badge>
                         </div>
                       </div>
@@ -232,18 +225,16 @@ export default function DispatchMapPage() {
                 );
               })}
 
-              {/* Marcadores de Ambulancias */}
+              {/* Marcadores de Ambulancias posicionadas por Hospital Base */}
               {ambulancias?.map((ambulance: any) => {
-                const associatedHospital = hospitales?.find(h => 
-                  h.id === ambulance.hospitalId || 
-                  h.nombre === ambulance.hospitalAsociado
-                );
+                // Buscamos el hospital base por el campo hospital_id
+                const baseHospital = hospitales?.find(h => h.id === ambulance.hospital_id);
+                const baseCoords = baseHospital ? getHospitalCoords(baseHospital) : null;
                 
-                const coords = associatedHospital ? getHospitalCoords(associatedHospital) : null;
-                if (!coords) return null;
+                if (!baseCoords) return null;
 
-                // Desplazamiento estratégico para visibilidad: un poco más alejado para que no se pise con el pin rojo
-                const offsetCoords: [number, number] = [coords[0] - 0.0003, coords[1] + 0.0003];
+                // Aplicamos un desplazamiento de ~35 metros (0.0003 grados) para visibilidad
+                const offsetCoords: [number, number] = [baseCoords[0] - 0.0003, baseCoords[1] + 0.0003];
 
                 return (
                   <Marker 
@@ -255,16 +246,16 @@ export default function DispatchMapPage() {
                       <div className="p-1 space-y-2">
                         <div className="flex items-center gap-2 border-b pb-1">
                           <Truck className="h-4 w-4 text-primary" />
-                          <p className="font-bold text-slate-900">Placa: {ambulance.placa ?? 'S/P'}</p>
+                          <p className="font-bold text-slate-900">Placa: {ambulance.placa}</p>
                         </div>
                         <div className="space-y-1">
                           <div className="flex justify-between items-center text-[10px]">
                             <span className="text-slate-500">Estado</span>
-                            <Badge className={`h-4 px-1.5 border-none ${getAmbulanceStatusColor(ambulance.estado)}`}>
-                              {ambulance.estado?.toUpperCase() || 'DESCONOCIDO'}
+                            <Badge className="h-4 px-1.5 border-none bg-slate-100 text-slate-700 font-bold uppercase">
+                              {ambulance.estado}
                             </Badge>
                           </div>
-                          <p className="text-[10px] text-slate-400">Base: <span className="text-slate-700 font-medium">{getHospitalName(associatedHospital)}</span></p>
+                          <p className="text-[10px] text-slate-400">Base: <span className="text-slate-700 font-medium">{getHospitalName(baseHospital)}</span></p>
                         </div>
                       </div>
                     </Popup>
