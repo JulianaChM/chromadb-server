@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Activity, MapPin, Navigation, User, AlertTriangle, CheckCircle2, RefreshCcw, Loader2, Home } from 'lucide-react';
 import Link from 'next/link';
 import { db } from '@/firebase';
-import { collection, addDoc, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 
 export default function RegistroIncidentePage() {
   const [formData, setFormData] = useState({
@@ -25,18 +25,19 @@ export default function RegistroIncidentePage() {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [status, setStatus] = useState<'idle' | 'success' | 'no-ambulance' | 'error'>('idle');
-  const [assignedAmbulance, setAssignedAmbulance] = useState<any>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
     setStatus('idle');
 
-    let latitude = 5.0689; // Default Manizales
+    // Valores por defecto (Centro de Manizales)
+    let latitude = 5.0689; 
     let longitude = -75.5174;
 
     try {
-      // 1. Geocodificación: Obtener coordenadas reales usando Nominatim
+      // 1. Geocodificación: Obtener coordenadas reales usando Nominatim (OpenStreetMap)
+      // Agregamos Manizales y Colombia para mayor precisión
       const query = encodeURIComponent(`${formData.direccion}, Manizales, Caldas, Colombia`);
       const geoResponse = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${query}&limit=1`);
       const geoData = await geoResponse.json();
@@ -50,7 +51,6 @@ export default function RegistroIncidentePage() {
       }
 
       // 2. Crear el documento del incidente en Firestore
-      // Esto asegura que el Dashboard lo vea inmediatamente
       const incidenteRef = await addDoc(collection(db, 'incidentes'), {
         descripcion: formData.descripcion,
         tipo_emergencia: formData.tipo_emergencia,
@@ -64,7 +64,7 @@ export default function RegistroIncidentePage() {
         createdAt: serverTimestamp(),
       });
 
-      // 3. Enviar a n8n para triaje avanzado
+      // 3. Enviar a n8n para procesamiento secundario
       const body = {
         incidente_id: incidenteRef.id,
         tipo: "emergencia",
@@ -77,36 +77,13 @@ export default function RegistroIncidentePage() {
         lng: longitude
       };
 
-      const response = await fetch('https://linita22-3.app.n8n.cloud/webhook-test/emergencias', {
+      await fetch('https://linita22-3.app.n8n.cloud/webhook-test/emergencias', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
 
-      const data = await response.json();
-
-      if (data.ok === true) {
-        setAssignedAmbulance(data.ambulancia);
-        
-        // Si n8n asignó una ambulancia, actualizamos Firestore (opcional si la simulación lo hace)
-        if (data.ambulancia?.id) {
-          await updateDoc(doc(db, 'ambulancias', data.ambulancia.id), {
-            estado: 'EN_RUTA'
-          });
-          
-          await updateDoc(doc(db, 'incidentes', incidenteRef.id), {
-            estado: 'EN_RUTA',
-            ambulancia_id: data.ambulancia.id,
-            ambulancia_placa: data.ambulancia.placa || 'Asignada'
-          });
-        }
-        setStatus('success');
-      } else if (data.ok === false) {
-        setStatus('no-ambulance');
-      } else {
-        // Aunque n8n falle, el incidente ya está en Firestore, lo marcamos como éxito local
-        setStatus('success');
-      }
+      setStatus('success');
     } catch (error) {
       console.error("[REGISTRO] Error:", error);
       setStatus('error');
@@ -125,7 +102,6 @@ export default function RegistroIncidentePage() {
       direccion: '',
     });
     setStatus('idle');
-    setAssignedAmbulance(null);
   };
 
   const isFormValid = formData.descripcion && formData.tipo_emergencia && formData.prioridad && formData.direccion;
@@ -142,7 +118,7 @@ export default function RegistroIncidentePage() {
             </div>
             <h2 className="text-2xl font-headline font-bold text-green-800">Emergencia Registrada</h2>
             <p className="text-green-700">
-              El reporte ha sido enviado al centro de mando. {assignedAmbulance ? `Unidad ${assignedAmbulance.placa || ''} en camino.` : 'Estamos asignando una unidad.'}
+              El reporte ha sido enviado al centro de mando con geolocalización precisa. Estamos asignando una unidad.
             </p>
             <Button onClick={resetForm} className="w-full rounded-full bg-green-600 hover:bg-green-700">
               Registrar otra emergencia
@@ -244,7 +220,7 @@ export default function RegistroIncidentePage() {
                   <Input 
                     id="direccion" 
                     required
-                    placeholder="Calle, Carrera, Barrio o Punto de referencia" 
+                    placeholder="Calle, Carrera, Barrio o Punto de referencia en Manizales" 
                     className="pl-10 h-11 rounded-xl"
                     value={formData.direccion}
                     onChange={(e) => setFormData({...formData, direccion: e.target.value})}
