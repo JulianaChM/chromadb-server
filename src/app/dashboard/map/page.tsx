@@ -157,10 +157,12 @@ export default function DispatchMapPage() {
   const handleConfirmDispatch = async () => {
     if (!bestUnit || !selectedIncidentId || isSimulating || !currentIncident) return;
 
+    const incidentId = selectedIncidentId;
     const ambulanceId = bestUnit.ambulance.id;
     const initialRoute = [...bestUnit.points];
     const incidentCoords = [currentIncident.lat, currentIncident.lng];
 
+    console.log(`[SIM] Iniciando despacho para incidente ${incidentId}`);
     setIsSimulating(true);
     setSimulatingAmbulanceId(ambulanceId);
     setSimulatedCoords(initialRoute[0]);
@@ -169,13 +171,20 @@ export default function DispatchMapPage() {
     
     try {
       const ambRef = doc(db, 'ambulancias', ambulanceId);
-      await updateDoc(ambRef, { estado: 'EN_RUTA' });
+      const incRef = doc(db, 'incidentes', incidentId);
 
-      // Fase 1: Trayecto al incidente
+      // FASE 1: ACTUALIZACIÓN INICIAL - Ambulancia e Incidente "EN_RUTA"
+      console.log(`[SIM] Fase 1: Actualizando estados a EN_RUTA`);
+      await updateDoc(ambRef, { estado: 'EN_RUTA' });
+      await updateDoc(incRef, { estado: 'EN_RUTA' });
+
+      // Animación al incidente
       await runAnimation(initialRoute, 50);
 
-      // Fase 2: Llegada al incidente y búsqueda del hospital más cercano
+      // FASE 2: LLEGADA AL INCIDENTE - Incidente "EN_PROCESO", Ambulancia "OCUPADA"
+      console.log(`[SIM] Fase 2: Llegada al incidente. Incidente EN_PROCESO.`);
       setSimulationPhase('to-hospital');
+      await updateDoc(incRef, { estado: 'EN_PROCESO' });
       await updateDoc(ambRef, { 
         estado: 'OCUPADA',
         lat: incidentCoords[0],
@@ -184,7 +193,7 @@ export default function DispatchMapPage() {
 
       const nearestHospital = findNearestHospital(incidentCoords);
       if (nearestHospital) {
-        console.log("[SIM] Hospital más cercano con capacidad encontrado:", nearestHospital.nombre);
+        console.log(`[SIM] Hospital más cercano: ${nearestHospital.nombre}. Iniciando traslado.`);
         const url = `https://router.project-osrm.org/route/v1/driving/${incidentCoords[1]},${incidentCoords[0]};${nearestHospital.lng},${nearestHospital.lat}?overview=full&geometries=geojson`;
         const response = await fetch(url);
         const hospitalRouteData = await response.json();
@@ -196,8 +205,16 @@ export default function DispatchMapPage() {
           // Animar hacia el hospital
           await runAnimation(hospitalRoute, 50);
 
-          // Fase 3: Llegada al hospital
+          // FASE 3: LLEGADA AL HOSPITAL - Incidente "COMPLETADO", Ambulancia "DISPONIBLE"
+          console.log(`[SIM] Fase 3: Llegada al hospital. Incidente COMPLETADO.`);
           const hospitalRef = doc(db, 'hospitales', nearestHospital.id);
+          
+          await updateDoc(incRef, { 
+            estado: 'COMPLETADO',
+            hospital_id: nearestHospital.id,
+            finalizado_at: new Date().toISOString()
+          });
+
           await updateDoc(hospitalRef, {
             capacidad_disponible: increment(-1)
           });
@@ -221,10 +238,11 @@ export default function DispatchMapPage() {
         setSelectedIncidentId(null);
         setBestUnit(null);
         setEvaluatedUnits([]);
+        console.log(`[SIM] Ciclo completo finalizado.`);
       }, 1500);
 
     } catch (error) {
-      console.error("[SIM] Error crítico:", error);
+      console.error("[SIM] Error crítico durante el flujo:", error);
       setIsSimulating(false);
     }
   };
@@ -358,7 +376,7 @@ export default function DispatchMapPage() {
                   <SelectValue placeholder="Seleccionar reporte" />
                 </SelectTrigger>
                 <SelectContent className="rounded-xl">
-                  {incidentes?.map((inc: any) => (
+                  {incidentes?.filter((inc: any) => inc.estado !== 'COMPLETADO')?.map((inc: any) => (
                     <SelectItem key={inc.id} value={inc.id}>
                       {inc.id} - {inc.tipo_emergencia || 'Emergencia'}
                     </SelectItem>
@@ -424,6 +442,15 @@ export default function DispatchMapPage() {
                         </p>
                       </div>
                     </div>
+
+                    {isSimulating && (
+                      <div className="mt-4 pt-4 border-t border-amber-200">
+                        <p className="text-xs font-bold text-amber-700 flex items-center gap-2">
+                           <Activity className="h-3 w-3 animate-pulse" />
+                           Estado: <span className="capitalize">{currentIncident?.estado || 'Procesando'}</span>
+                        </p>
+                      </div>
+                    )}
                   </div>
 
                   {!isSimulating && evaluatedUnits.length > 1 && (
@@ -454,5 +481,24 @@ export default function DispatchMapPage() {
         </Card>
       </div>
     </div>
+  );
+}
+
+function Activity(props: any) {
+  return (
+    <svg
+      {...props}
+      xmlns="http://www.w3.org/2000/svg"
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+    </svg>
   );
 }
