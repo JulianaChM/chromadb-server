@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useEffect, useMemo } from 'react';
@@ -59,7 +58,6 @@ export default function DispatchMapPage() {
 
   // Helper para obtener coordenadas de un documento de hospital
   const getHospitalCoords = (hospital: any): [number, number] | null => {
-    // Intenta obtener lat/lng de varios formatos posibles (GeoPoint o campos individuales)
     const lat = hospital.coordinates?.latitude ?? hospital.latitude ?? hospital.lat;
     const lng = hospital.coordinates?.longitude ?? hospital.longitude ?? hospital.lng;
     
@@ -73,21 +71,20 @@ export default function DispatchMapPage() {
 
   // Telemetría de ambulancias en consola
   useEffect(() => {
-    if (hospitales && ambulancias) {
-      let matched = 0;
-      let unmatched = 0;
+    if (ambulancias) {
+      let renderizadas = 0;
+      let fallidas = 0;
       ambulancias.forEach((amb: any) => {
-        const hospital = hospitales.find(h => h.id === amb.hospital_id);
-        if (hospital && getHospitalCoords(hospital)) {
-          matched++;
+        if (typeof amb.lat === 'number' && typeof amb.lng === 'number') {
+          renderizadas++;
         } else {
-          unmatched++;
-          console.warn(`[Ambulancia] La unidad con placa ${amb.placa} no pudo encontrar su hospital base con ID: ${amb.hospital_id}`);
+          fallidas++;
+          console.warn(`[Ambulancia] La unidad con placa ${amb.placa} no tiene coordenadas válidas (lat/lng).`);
         }
       });
-      console.log(`[Sync] Ambulancias: ${ambulancias.length} cargadas, ${matched} renderizadas, ${unmatched} fallidas.`);
+      console.log(`[Sync] Ambulancias: ${ambulancias.length} cargadas, ${renderizadas} renderizadas, ${fallidas} fallidas.`);
     }
-  }, [hospitales, ambulancias]);
+  }, [ambulancias]);
 
   useEffect(() => {
     import('leaflet').then((L) => {
@@ -225,21 +222,23 @@ export default function DispatchMapPage() {
                 );
               })}
 
-              {/* Marcadores de Ambulancias posicionadas por Hospital Base */}
+              {/* Marcadores de Ambulancias posicionadas por sus propias coordenadas */}
               {ambulancias?.map((ambulance: any) => {
-                // Buscamos el hospital base por el campo hospital_id
-                const baseHospital = hospitales?.find(h => h.id === ambulance.hospital_id);
-                const baseCoords = baseHospital ? getHospitalCoords(baseHospital) : null;
+                const lat = ambulance.lat;
+                const lng = ambulance.lng;
                 
-                if (!baseCoords) return null;
+                if (typeof lat !== 'number' || typeof lng !== 'number') return null;
 
-                // Aplicamos un desplazamiento de ~35 metros (0.0003 grados) para visibilidad
-                const offsetCoords: [number, number] = [baseCoords[0] - 0.0003, baseCoords[1] + 0.0003];
+                const coords: [number, number] = [lat, lng];
+
+                // Buscamos el hospital base solo para mostrar el nombre en el popup
+                const baseHospital = hospitales?.find(h => h.id === ambulance.hospital_id);
+                const hospitalBaseName = baseHospital ? getHospitalName(baseHospital) : 'Sin base asignada';
 
                 return (
                   <Marker 
                     key={ambulance.id} 
-                    position={offsetCoords} 
+                    position={coords} 
                     icon={leafletIcons.ambulance(ambulance.estado)}
                   >
                     <Popup>
@@ -255,7 +254,7 @@ export default function DispatchMapPage() {
                               {ambulance.estado}
                             </Badge>
                           </div>
-                          <p className="text-[10px] text-slate-400">Base: <span className="text-slate-700 font-medium">{getHospitalName(baseHospital)}</span></p>
+                          <p className="text-[10px] text-slate-400">Base: <span className="text-slate-700 font-medium">{hospitalBaseName}</span></p>
                         </div>
                       </div>
                     </Popup>
