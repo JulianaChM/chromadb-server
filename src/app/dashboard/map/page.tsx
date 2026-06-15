@@ -162,7 +162,7 @@ export default function DispatchMapPage() {
     const initialRoute = [...bestUnit.points];
     const incidentCoords = [currentIncident.lat, currentIncident.lng];
 
-    console.log(`[SIM] Iniciando despacho para incidente ${incidentId}`);
+    console.log(`[SIM] Iniciando despacho para incidente ${incidentId} con unidad ${bestUnit.ambulance.placa}`);
     setIsSimulating(true);
     setSimulatingAmbulanceId(ambulanceId);
     setSimulatedCoords(initialRoute[0]);
@@ -174,9 +174,14 @@ export default function DispatchMapPage() {
       const incRef = doc(db, 'incidentes', incidentId);
 
       // FASE 1: ACTUALIZACIÓN INICIAL - Ambulancia e Incidente "EN_RUTA"
-      console.log(`[SIM] Fase 1: Actualizando estados a EN_RUTA`);
+      // Se registran ID y Placa de la ambulancia en el incidente
+      console.log(`[SIM] Fase 1: Actualizando estados a EN_RUTA y asignando ambulancia`);
       await updateDoc(ambRef, { estado: 'EN_RUTA' });
-      await updateDoc(incRef, { estado: 'EN_RUTA' });
+      await updateDoc(incRef, { 
+        estado: 'EN_RUTA',
+        ambulancia_id: ambulanceId,
+        ambulancia_placa: bestUnit.ambulance.placa
+      });
 
       // Animación al incidente
       await runAnimation(initialRoute, 50);
@@ -432,13 +437,13 @@ export default function DispatchMapPage() {
                       <div className="bg-white p-3 rounded-xl border border-slate-100">
                         <Clock className="h-4 w-4 text-primary mb-1" />
                         <p className="text-lg font-bold text-slate-800">
-                          {Math.round(bestUnit?.duration || 0)} min
+                          {Math.round(bestUnit?.duration || 0) || '--'} min
                         </p>
                       </div>
                       <div className="bg-white p-3 rounded-xl border border-slate-100">
                         <Ruler className="h-4 w-4 text-primary mb-1" />
                         <p className="text-lg font-bold text-slate-800">
-                          {bestUnit?.distance.toFixed(1)} km
+                          {bestUnit?.distance.toFixed(1) || '--'} km
                         </p>
                       </div>
                     </div>
