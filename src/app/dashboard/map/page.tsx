@@ -58,6 +58,12 @@ export default function DispatchMapPage() {
   const ambulanciasRef = useMemo(() => collection(db, 'ambulancias'), []);
   const { data: ambulancias, loading: ambulanciasLoading } = useCollection(ambulanciasRef);
 
+  // Estadísticas de carga para consola
+  useEffect(() => {
+    if (hospitales) console.log(`[Firestore] Hospitales cargados: ${hospitales.length}`);
+    if (ambulancias) console.log(`[Firestore] Ambulancias cargadas: ${ambulancias.length}`);
+  }, [hospitales, ambulancias]);
+
   // Helper para obtener coordenadas de un documento de hospital
   const getHospitalCoords = (hospital: any): [number, number] | null => {
     const lat = hospital.coordinates?.latitude ?? hospital.latitude ?? hospital.lat;
@@ -99,7 +105,7 @@ export default function DispatchMapPage() {
         iconAnchor: [60, 50],
       });
 
-      // Icono para ambulancias (Círculo con color de estado)
+      // Icono para ambulancias (Forma de Vehículo)
       const ambulanceIcon = (status: string) => {
         let color = "#22c55e"; // Disponible (Verde)
         if (status?.toUpperCase() === 'EN RUTA') color = "#eab308"; // En Ruta (Amarillo)
@@ -107,12 +113,14 @@ export default function DispatchMapPage() {
 
         return L.divIcon({
           html: `
-            <div style="background-color: ${color}; padding: 6px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.2); display: flex; align-items: center; justify-content: center;">
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="12" x="2" y="6" rx="2"/><path d="M12 12h.01"/><path d="M17 12h.01"/><path d="M7 12h.01"/></svg>
+            <div style="background-color: ${color}; padding: 6px; border-radius: 8px; border: 2px solid white; box-shadow: 0 4px 6px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center;">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18h6a1 1 0 0 0 1-1V8.5L18.5 5H15"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>
+              </svg>
             </div>`,
           className: '',
-          iconSize: [32, 32],
-          iconAnchor: [16, 16],
+          iconSize: [38, 38],
+          iconAnchor: [19, 19],
         });
       };
 
@@ -154,7 +162,6 @@ export default function DispatchMapPage() {
     return route.path.map(p => mapGridPointToLatLng(p));
   }, [route]);
 
-  // Determina el estado del badge de ambulancia
   const getAmbulanceStatusColor = (status: string) => {
     switch (status?.toUpperCase()) {
       case 'DISPONIBLE': return "bg-green-100 text-green-700";
@@ -201,9 +208,7 @@ export default function DispatchMapPage() {
                 if (!coords) return null;
 
                 const name = getHospitalName(hospital);
-                const cap = hospital.capacidad ?? hospital.capacity ?? 0;
-                const occ = hospital.ocupacion ?? hospital.occupancyCurrent ?? 0;
-                const available = cap - occ;
+                const hasAvailability = hospital.capacidad_disponible === true;
 
                 return (
                   <Marker 
@@ -215,13 +220,11 @@ export default function DispatchMapPage() {
                       <div className="p-1 space-y-1 min-w-[150px]">
                         <p className="font-bold text-slate-900 leading-tight">{name}</p>
                         <p className="text-xs text-slate-500">{hospital.direccion ?? hospital.address ?? 'Sin dirección'}</p>
-                        <div className="pt-2 border-t mt-2">
-                          <div className="flex justify-between items-center">
-                            <span className="text-[10px] font-bold text-primary uppercase">Camas Libres</span>
-                            <Badge variant={available > 0 ? "secondary" : "destructive"} className="h-4 text-[9px] px-1">
-                              {available}
-                            </Badge>
-                          </div>
+                        <div className="pt-2 border-t mt-2 flex items-center justify-between">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase">Disponibilidad</span>
+                          <Badge variant={hasAvailability ? "secondary" : "destructive"} className="h-5 text-[10px] px-2 font-bold">
+                            {hasAvailability ? 'SÍ' : 'NO'}
+                          </Badge>
                         </div>
                       </div>
                     </Popup>
@@ -231,18 +234,16 @@ export default function DispatchMapPage() {
 
               {/* Marcadores de Ambulancias */}
               {ambulancias?.map((ambulance: any) => {
-                // Encontrar el hospital asociado para obtener las coordenadas
                 const associatedHospital = hospitales?.find(h => 
                   h.id === ambulance.hospitalId || 
-                  h.nombre === ambulance.hospitalAsociado ||
-                  h.id === ambulance.idHospital
+                  h.nombre === ambulance.hospitalAsociado
                 );
                 
                 const coords = associatedHospital ? getHospitalCoords(associatedHospital) : null;
                 if (!coords) return null;
 
-                // Añadir un pequeño "offset" para que no se solape exactamente con el pin del hospital
-                const offsetCoords: [number, number] = [coords[0] - 0.0002, coords[1] + 0.0002];
+                // Desplazamiento estratégico para visibilidad: un poco más alejado para que no se pise con el pin rojo
+                const offsetCoords: [number, number] = [coords[0] - 0.0003, coords[1] + 0.0003];
 
                 return (
                   <Marker 
@@ -251,21 +252,19 @@ export default function DispatchMapPage() {
                     icon={leafletIcons.ambulance(ambulance.estado)}
                   >
                     <Popup>
-                      <div className="p-1 space-y-1">
-                        <div className="flex items-center gap-2">
-                          <div className="bg-slate-100 p-1 rounded-md">
-                            <Truck className="h-4 w-4 text-slate-700" />
-                          </div>
+                      <div className="p-1 space-y-2">
+                        <div className="flex items-center gap-2 border-b pb-1">
+                          <Truck className="h-4 w-4 text-primary" />
                           <p className="font-bold text-slate-900">Placa: {ambulance.placa ?? 'S/P'}</p>
                         </div>
-                        <div className="flex justify-between items-center mt-2">
-                          <span className="text-[10px] text-slate-500">Estado:</span>
-                          <Badge className={`text-[9px] h-4 px-1 border-none ${getAmbulanceStatusColor(ambulance.estado)}`}>
-                            {ambulance.estado?.toUpperCase() || 'DESCONOCIDO'}
-                          </Badge>
-                        </div>
-                        <div className="text-[10px] text-slate-400 border-t pt-1 mt-1">
-                          Base: {getHospitalName(associatedHospital)}
+                        <div className="space-y-1">
+                          <div className="flex justify-between items-center text-[10px]">
+                            <span className="text-slate-500">Estado</span>
+                            <Badge className={`h-4 px-1.5 border-none ${getAmbulanceStatusColor(ambulance.estado)}`}>
+                              {ambulance.estado?.toUpperCase() || 'DESCONOCIDO'}
+                            </Badge>
+                          </div>
+                          <p className="text-[10px] text-slate-400">Base: <span className="text-slate-700 font-medium">{getHospitalName(associatedHospital)}</span></p>
                         </div>
                       </div>
                     </Popup>
