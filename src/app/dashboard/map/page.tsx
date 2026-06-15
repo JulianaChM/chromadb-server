@@ -6,7 +6,7 @@ import dynamic from 'next/dynamic';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Info, CheckCircle2, RefreshCw, GitFork, ListChecks, MapPin, AlertCircle, Loader2 } from 'lucide-react';
+import { Info, CheckCircle2, RefreshCw, GitFork, ListChecks, MapPin, AlertCircle, Loader2, Building2 } from 'lucide-react';
 import { findBestRoute, Point, RouteResult } from '@/lib/a-star';
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -39,7 +39,8 @@ const Popup = dynamic(
 const CENTER_LAT = 5.0689;
 const CENTER_LNG = -75.5174;
 
-const mapPointToLatLng = (p: Point): [number, number] => {
+// Función para mapear puntos de la rejilla A* a coordenadas geográficas (simulación)
+const mapGridPointToLatLng = (p: Point): [number, number] => {
   const scale = 0.0005;
   return [CENTER_LAT + (p.y - 20) * scale, CENTER_LNG + (p.x - 20) * scale];
 };
@@ -52,7 +53,7 @@ export default function DispatchMapPage() {
 
   // Consulta real a Firestore para hospitales
   const hospitalsRef = useMemo(() => collection(db, 'hospitals'), []);
-  const { data: hospitals, loading: hospitalsLoading } = useCollection(hospitalsRef);
+  const { data: hospitals, loading: hospitalsLoading, error: hospitalsError } = useCollection(hospitalsRef);
 
   useEffect(() => {
     import('leaflet').then((L) => {
@@ -78,16 +79,32 @@ export default function DispatchMapPage() {
     });
   }, []);
 
+  // Puntos base para el algoritmo A*
   const startPos: Point = { x: 10, y: 10 };
-  const endPos: Point = { x: 45, y: 32 };
+  
+  // Derivamos el destino de forma dinámica según la emergencia para que la ruta cambie
+  const getEndPos = (emergencyId: string | null): Point => {
+    if (!emergencyId) return { x: 45, y: 32 };
+    // Simulamos un destino diferente basado en el ID de la emergencia
+    const seed = emergencyId.charCodeAt(emergencyId.length - 1);
+    return { 
+      x: 20 + (seed % 30), 
+      y: 15 + (seed % 25) 
+    };
+  };
 
   const calculateAStar = () => {
+    if (!selectedEmergencyId) return;
     setIsCalculating(true);
+    
+    // El algoritmo A* trabaja sobre una rejilla lógica (0-100 por ej)
+    const endPos = getEndPos(selectedEmergencyId);
+    
     setTimeout(() => {
       const result = findBestRoute(startPos, endPos);
       setRoute(result);
       setIsCalculating(false);
-    }, 800);
+    }, 600);
   };
 
   useEffect(() => {
@@ -98,8 +115,22 @@ export default function DispatchMapPage() {
 
   const polylinePath = useMemo(() => {
     if (!route) return [];
-    return route.path.map(p => mapPointToLatLng(p));
+    return route.path.map(p => mapGridPointToLatLng(p));
   }, [route]);
+
+  // Función para extraer coordenadas de forma segura independientemente del nombre del campo
+  const getHospitalCoords = (hospital: any): [number, number] | null => {
+    const lat = hospital.coordinates?.latitude ?? hospital.latitude ?? hospital.lat;
+    const lng = hospital.coordinates?.longitude ?? hospital.longitude ?? hospital.lng;
+    
+    if (typeof lat === 'number' && typeof lng === 'number') {
+      return [lat, lng];
+    }
+    return null;
+  };
+
+  // Función para obtener el nombre del hospital (soporta name o nombre)
+  const getHospitalName = (hospital: any) => hospital.name ?? hospital.nombre ?? 'Hospital sin nombre';
 
   return (
     <div className="flex flex-col lg:flex-row gap-6 h-[calc(100vh-10rem)] animate-in fade-in duration-700">
@@ -108,7 +139,7 @@ export default function DispatchMapPage() {
         
         <MapContainer 
           center={[CENTER_LAT, CENTER_LNG]} 
-          zoom={15} 
+          zoom={14} 
           style={{ height: '100%', width: '100%' }}
         >
           <TileLayer
@@ -118,45 +149,58 @@ export default function DispatchMapPage() {
           
           {leafletIcons && (
             <>
-              <Marker position={mapPointToLatLng(startPos)} icon={leafletIcons.ambulance}>
-                <Popup>Origen (Ambulancia / Incidente)</Popup>
+              {/* Marcador de la Ambulancia / Origen */}
+              <Marker position={mapGridPointToLatLng(startPos)} icon={leafletIcons.ambulance}>
+                <Popup>Ubicación de la Emergencia (Origen)</Popup>
               </Marker>
               
-              {/* Renderizado dinámico de hospitales desde Firestore */}
-              {hospitals?.map((hospital: any) => (
-                <Marker 
-                  key={hospital.id} 
-                  position={[hospital.coordinates?.latitude || CENTER_LAT, hospital.coordinates?.longitude || CENTER_LNG]} 
-                  icon={leafletIcons.hospital}
-                >
-                  <Popup>
-                    <div className="p-1 space-y-1">
-                      <p className="font-bold text-slate-900">{hospital.name}</p>
-                      <p className="text-xs text-slate-500">{hospital.address}</p>
-                      <div className="pt-2 border-t mt-2">
-                        <p className="text-[10px] font-bold text-primary uppercase">Capacidad Disponible</p>
-                        <p className="text-sm font-bold">
-                          {(hospital.capacity || 0) - (hospital.occupancyCurrent || 0)} camas
-                        </p>
+              {/* Marcadores Dinámicos de Hospitales desde Firestore */}
+              {hospitals?.map((hospital: any) => {
+                const coords = getHospitalCoords(hospital);
+                if (!coords) return null;
+
+                const cap = hospital.capacity ?? 0;
+                const occ = hospital.occupancyCurrent ?? 0;
+                const available = cap - occ;
+
+                return (
+                  <Marker 
+                    key={hospital.id} 
+                    position={coords} 
+                    icon={leafletIcons.hospital}
+                  >
+                    <Popup>
+                      <div className="p-1 space-y-1 min-w-[150px]">
+                        <p className="font-bold text-slate-900 leading-tight">{getHospitalName(hospital)}</p>
+                        <p className="text-xs text-slate-500">{hospital.address ?? 'Sin dirección'}</p>
+                        <div className="pt-2 border-t mt-2">
+                          <div className="flex justify-between items-center">
+                            <span className="text-[10px] font-bold text-primary uppercase">Camas Libres</span>
+                            <Badge variant={available > 10 ? "secondary" : "destructive"} className="h-4 text-[9px] px-1">
+                              {available}
+                            </Badge>
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  </Popup>
-                </Marker>
-              ))}
+                    </Popup>
+                  </Marker>
+                );
+              })}
             </>
           )}
 
           {polylinePath.length > 0 && (
             <Polyline 
               positions={polylinePath} 
-              pathOptions={{ color: '#1565C0', weight: 5, opacity: 0.7, dashArray: '10, 10' }} 
+              pathOptions={{ color: '#1565C0', weight: 6, opacity: 0.8, dashArray: '8, 12', lineCap: 'round' }} 
             />
           )}
         </MapContainer>
 
-        <div className="absolute top-6 left-6 z-[1000] w-72">
+        {/* Panel de Selección flotante */}
+        <div className="absolute top-6 left-6 z-[1000] w-72 space-y-3">
           <Card className="shadow-2xl border-none rounded-2xl bg-white/95 backdrop-blur">
-            <CardHeader className="p-4">
+            <CardHeader className="p-4 pb-2">
               <CardTitle className="text-sm font-bold flex items-center gap-2">
                 {hospitalsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <AlertCircle className="h-4 w-4 text-primary" />}
                 Seleccionar Emergencia
@@ -177,6 +221,20 @@ export default function DispatchMapPage() {
               </Select>
             </CardContent>
           </Card>
+
+          {/* Estado de la Red */}
+          <Card className="shadow-xl border-none rounded-2xl bg-white/90 backdrop-blur p-3">
+             <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs font-bold text-slate-600">
+                  <Building2 className="h-3 w-3" />
+                  Hospitales en Red
+                </div>
+                <Badge variant="outline" className="text-[10px] font-bold">
+                  {hospitalsLoading ? '...' : (hospitals?.length || 0)} centros
+                </Badge>
+             </div>
+             {hospitalsError && <p className="text-[10px] text-destructive mt-1">Error de conexión con Firestore</p>}
+          </Card>
         </div>
       </div>
 
@@ -195,7 +253,7 @@ export default function DispatchMapPage() {
                   <div className="bg-slate-100 h-16 w-16 rounded-full flex items-center justify-center mx-auto">
                     <MapPin className="h-8 w-8 text-slate-400" />
                   </div>
-                  <p className="text-sm text-slate-500 font-medium">Seleccione una emergencia para calcular la ruta óptima.</p>
+                  <p className="text-sm text-slate-500 font-medium px-4">Seleccione una emergencia para calcular la trayectoria óptima.</p>
                 </div>
               ) : (
                 <div className="space-y-4">
@@ -226,14 +284,16 @@ export default function DispatchMapPage() {
                       <ListChecks className="h-3 w-3" /> Puntos de Navegación
                     </p>
                     <div className="space-y-2">
-                      {polylinePath.slice(0, 3).map((latlng, idx) => (
-                        <div key={idx} className="flex items-center justify-between p-2 bg-slate-50 rounded-lg border border-slate-100 text-[10px] text-slate-600">
-                          <span className="font-bold">Nodo {idx + 1}</span>
-                          <span>{latlng[0].toFixed(4)}, {latlng[1].toFixed(4)}</span>
-                        </div>
-                      ))}
-                      <p className="text-[10px] text-center text-slate-400">
-                        {polylinePath.length} waypoints calculados.
+                      <div className="flex items-center justify-between p-2 bg-slate-50 rounded-lg border border-slate-100 text-[10px] text-slate-600">
+                        <span className="font-bold">Origen</span>
+                        <span>GRID {startPos.x}, {startPos.y}</span>
+                      </div>
+                      <div className="flex items-center justify-between p-2 bg-primary/10 rounded-lg border border-primary/20 text-[10px] text-primary">
+                        <span className="font-bold">Destino</span>
+                        <span>GRID {getEndPos(selectedEmergencyId).x}, {getEndPos(selectedEmergencyId).y}</span>
+                      </div>
+                      <p className="text-[10px] text-center text-slate-400 mt-2">
+                        {polylinePath.length} nodos calculados dinámicamente.
                       </p>
                     </div>
                   </div>
@@ -255,7 +315,7 @@ export default function DispatchMapPage() {
               onClick={calculateAStar}
               disabled={isCalculating || !selectedEmergencyId}
             >
-              <RefreshCw className={`h-4 w-4 ${isCalculating ? 'animate-spin' : ''}`} /> Recalcular
+              <RefreshCw className={`h-4 w-4 ${isCalculating ? 'animate-spin' : ''}`} /> Recalcular Trayectoria
             </Button>
           </div>
         </Card>
