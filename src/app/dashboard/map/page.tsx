@@ -6,9 +6,11 @@ import dynamic from 'next/dynamic';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Info, CheckCircle2, RefreshCw, GitFork, ListChecks } from 'lucide-react';
+import { Info, CheckCircle2, RefreshCw, GitFork, ListChecks, MapPin, AlertCircle } from 'lucide-react';
 import { findBestRoute, Point, RouteResult } from '@/lib/a-star';
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { mockEmergencies, mockHospitals } from "@/app/lib/mock-data";
 
 // Importación dinámica de Leaflet para evitar errores de SSR en Next.js
 const MapContainer = dynamic(
@@ -32,27 +34,30 @@ const Popup = dynamic(
   { ssr: false }
 );
 
-// Manizales, Colombia
+// Centro de Manizales, Colombia
 const CENTER_LAT = 5.0689;
 const CENTER_LNG = -75.5174;
 
-// Función para mapear puntos de A* (0-100) a coordenadas reales alrededor de Manizales
+// Función para mapear puntos de A* a coordenadas reales (Simulado para prototipado)
 const mapPointToLatLng = (p: Point): [number, number] => {
-  const scale = 0.0005; // Escala para distribuir los puntos en el mapa
+  const scale = 0.0005;
   return [CENTER_LAT + (p.y - 20) * scale, CENTER_LNG + (p.x - 20) * scale];
 };
 
 export default function DispatchMapPage() {
+  const [selectedEmergencyId, setSelectedEmergencyId] = useState<string | null>(null);
   const [route, setRoute] = useState<RouteResult | null>(null);
   const [isCalculating, setIsCalculating] = useState(false);
   const [leafletIcons, setLeafletIcons] = useState<any>(null);
 
-  // Inicializar iconos de Leaflet (solo cliente)
+  // TODO: Implementar fetching real desde Firestore para emergencias y hospitales
+  // const { data: emergencies } = useCollection(collection(db, 'emergencies'));
+
   useEffect(() => {
     import('leaflet').then((L) => {
       const ambulanceIcon = L.divIcon({
         html: `<div style="background-color: #1565C0; padding: 8px; border-radius: 50%; border: 3px solid white; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);">
-                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 10 10 10M14 10 14 10M18 10 18 10M4 10 4 10M8 10 8 10M12 10 12 10M16 10 16 10M20 10 20 10M6 14 6 14M10 14 10 14M14 14 14 14M18 14 18 14M22 14 22 14M4 14 4 14M8 14 8 14M12 14 12 14M16 14 16 14M20 14 20 14M2 18 2 18M6 18 6 18M10 18 10 18M14 18 14 18M18 18 18 18M22 18 22 18M4 18 4 18M8 18 8 18M12 18 12 18M16 18 16 18M20 18 20 18"/><rect width="20" height="12" x="2" y="6" rx="2"/><path d="M12 12h.01"/><path d="M17 12h.01"/><path d="M7 12h.01"/></svg>
+                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="12" x="2" y="6" rx="2"/><path d="M12 12h.01"/><path d="M17 12h.01"/><path d="M7 12h.01"/></svg>
                </div>`,
         className: '',
         iconSize: [40, 40],
@@ -72,22 +77,24 @@ export default function DispatchMapPage() {
     });
   }, []);
 
-  // Simulación de puntos para el algoritmo A*
-  const ambulancePos: Point = { x: 10, y: 10 };
-  const hospitalPos: Point = { x: 45, y: 32 };
+  // Coordenadas simuladas de ejemplo
+  const startPos: Point = { x: 10, y: 10 };
+  const endPos: Point = { x: 45, y: 32 };
 
   const calculateAStar = () => {
     setIsCalculating(true);
     setTimeout(() => {
-      const result = findBestRoute(ambulancePos, hospitalPos);
+      const result = findBestRoute(startPos, endPos);
       setRoute(result);
       setIsCalculating(false);
     }, 800);
   };
 
   useEffect(() => {
-    calculateAStar();
-  }, []);
+    if (selectedEmergencyId) {
+      calculateAStar();
+    }
+  }, [selectedEmergencyId]);
 
   const polylinePath = useMemo(() => {
     if (!route) return [];
@@ -104,28 +111,23 @@ export default function DispatchMapPage() {
           center={[CENTER_LAT, CENTER_LNG]} 
           zoom={15} 
           style={{ height: '100%', width: '100%' }}
-          scrollWheelZoom={true}
         >
           <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            attribution='&copy; OpenStreetMap contributors'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
           
           {leafletIcons && (
             <>
-              {/* Marcador de la Ambulancia */}
-              <Marker position={mapPointToLatLng(ambulancePos)} icon={leafletIcons.ambulance}>
-                <Popup>Ambulancia UNIT-101</Popup>
+              <Marker position={mapPointToLatLng(startPos)} icon={leafletIcons.ambulance}>
+                <Popup>Origen (Ambulancia / Incidente)</Popup>
               </Marker>
-
-              {/* Marcador del Hospital */}
-              <Marker position={mapPointToLatLng(hospitalPos)} icon={leafletIcons.hospital}>
-                <Popup>Hospital de Destino</Popup>
+              <Marker position={mapPointToLatLng(endPos)} icon={leafletIcons.hospital}>
+                <Popup>Destino (Hospital Seleccionado)</Popup>
               </Marker>
             </>
           )}
 
-          {/* Dibujo de la Ruta A* */}
           {polylinePath.length > 0 && (
             <Polyline 
               positions={polylinePath} 
@@ -134,11 +136,28 @@ export default function DispatchMapPage() {
           )}
         </MapContainer>
 
-        {/* Leyenda en el mapa */}
-        <div className="absolute bottom-6 left-6 bg-white/90 backdrop-blur p-4 rounded-2xl shadow-xl border border-white/50 z-[1000]">
-          <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
-            <GitFork className="h-3 w-3 text-primary" /> Ruta A* Optimizada
-          </div>
+        <div className="absolute top-6 left-6 z-[1000] w-72">
+          <Card className="shadow-2xl border-none rounded-2xl bg-white/95 backdrop-blur">
+            <CardHeader className="p-4">
+              <CardTitle className="text-sm font-bold flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 text-primary" /> Seleccionar Emergencia
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-4 pt-0">
+              <Select onValueChange={setSelectedEmergencyId}>
+                <SelectTrigger className="rounded-xl border-slate-200">
+                  <SelectValue placeholder="Emergencias Activas" />
+                </SelectTrigger>
+                <SelectContent>
+                  {mockEmergencies.map(e => (
+                    <SelectItem key={e.id} value={e.id}>
+                      {e.id} - {e.patientCondition}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </CardContent>
+          </Card>
         </div>
       </div>
 
@@ -153,71 +172,72 @@ export default function DispatchMapPage() {
           
           <ScrollArea className="flex-1">
             <CardContent className="p-6 space-y-6">
-              <div className="space-y-4">
-                <div className="p-4 rounded-2xl bg-primary/5 border border-primary/10">
-                  <p className="text-[10px] font-bold text-primary uppercase tracking-widest mb-2">Estado del Algoritmo</p>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-bold text-slate-800">Manizales Hub</p>
-                      <p className="text-xs text-slate-500 italic">f(n) = g(n) + h(n)</p>
-                    </div>
-                    <Badge className="bg-green-100 text-green-700 border-none px-3">ÓPTIMO</Badge>
+              {!selectedEmergencyId ? (
+                <div className="text-center py-12 space-y-4">
+                  <div className="bg-slate-100 h-16 w-16 rounded-full flex items-center justify-center mx-auto">
+                    <MapPin className="h-8 w-8 text-slate-400" />
                   </div>
+                  <p className="text-sm text-slate-500 font-medium">Seleccione una emergencia para calcular la ruta óptima.</p>
                 </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="p-4 rounded-2xl bg-slate-50 border text-center">
-                    <p className="text-2xl font-bold text-primary">{route?.estimatedTimeMinutes || '--'}</p>
-                    <p className="text-[10px] text-slate-400 font-bold uppercase">Minutos</p>
-                  </div>
-                  <div className="p-4 rounded-2xl bg-slate-50 border text-center">
-                    <p className="text-2xl font-bold text-primary">{route?.cost || '--'}</p>
-                    <p className="text-[10px] text-slate-400 font-bold uppercase">Nodos A*</p>
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                    <ListChecks className="h-3 w-3" /> Waypoints Geográficos
-                  </p>
-                  <div className="space-y-2">
-                    {polylinePath.slice(0, 5).map((latlng, idx) => (
-                      <div key={idx} className="flex items-center justify-between p-2 bg-slate-50 rounded-lg border border-slate-100 text-[10px] text-slate-600">
-                        <span className="font-bold">Punto {idx + 1}</span>
-                        <span>{latlng[0].toFixed(5)}, {latlng[1].toFixed(5)}</span>
+              ) : (
+                <div className="space-y-4">
+                  <div className="p-4 rounded-2xl bg-primary/5 border border-primary/10">
+                    <p className="text-[10px] font-bold text-primary uppercase tracking-widest mb-2">Análisis de Ruta</p>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-bold text-slate-800">Cálculo Optimizado</p>
+                        <p className="text-xs text-slate-500 italic">f(n) = g(n) + h(n)</p>
                       </div>
-                    ))}
-                    {polylinePath.length > 5 && (
-                      <p className="text-[10px] text-center text-slate-400 font-medium">
-                        + {polylinePath.length - 5} waypoints adicionales
-                      </p>
-                    )}
+                      <Badge className="bg-green-100 text-green-700 border-none px-3">ÓPTIMO</Badge>
+                    </div>
                   </div>
-                </div>
 
-                <div className="p-4 bg-blue-50/50 rounded-2xl border border-blue-100">
-                  <div className="flex gap-2">
-                    <Info className="h-4 w-4 text-blue-500 shrink-0" />
-                    <p className="text-xs text-blue-700 leading-relaxed">
-                      Utilizando OpenStreetMap para la cartografía base de Manizales. La ruta se dibuja dinámicamente según la lógica A*.
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="p-4 rounded-2xl bg-slate-50 border text-center">
+                      <p className="text-2xl font-bold text-primary">{route?.estimatedTimeMinutes || '--'}</p>
+                      <p className="text-[10px] text-slate-400 font-bold uppercase">Minutos</p>
+                    </div>
+                    <div className="p-4 rounded-2xl bg-slate-50 border text-center">
+                      <p className="text-2xl font-bold text-primary">{route?.cost || '--'}</p>
+                      <p className="text-[10px] text-slate-400 font-bold uppercase">Coste A*</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                      <ListChecks className="h-3 w-3" /> Puntos de Navegación
                     </p>
+                    <div className="space-y-2">
+                      {polylinePath.slice(0, 3).map((latlng, idx) => (
+                        <div key={idx} className="flex items-center justify-between p-2 bg-slate-50 rounded-lg border border-slate-100 text-[10px] text-slate-600">
+                          <span className="font-bold">Nodo {idx + 1}</span>
+                          <span>{latlng[0].toFixed(4)}, {latlng[1].toFixed(4)}</span>
+                        </div>
+                      ))}
+                      <p className="text-[10px] text-center text-slate-400">
+                        {polylinePath.length} waypoints calculados.
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
             </CardContent>
           </ScrollArea>
 
-          <div className="p-4 bg-slate-50 border-t space-y-2 mt-auto">
-             <Button className="w-full rounded-full bg-primary shadow-lg border-none py-6 font-bold flex items-center justify-center gap-2">
+          <div className="p-4 bg-slate-50 border-t space-y-2">
+             <Button 
+                disabled={!selectedEmergencyId}
+                className="w-full rounded-full bg-primary shadow-lg border-none py-6 font-bold flex items-center justify-center gap-2"
+              >
               <CheckCircle2 className="h-5 w-5" /> Confirmar Despacho
             </Button>
             <Button 
               variant="outline" 
               className="w-full rounded-full border-slate-200 py-6 font-bold flex items-center justify-center gap-2"
               onClick={calculateAStar}
-              disabled={isCalculating}
+              disabled={isCalculating || !selectedEmergencyId}
             >
-              <RefreshCw className={`h-4 w-4 ${isCalculating ? 'animate-spin' : ''}`} /> {isCalculating ? 'Procesando...' : 'Recalcular Ruta'}
+              <RefreshCw className={`h-4 w-4 ${isCalculating ? 'animate-spin' : ''}`} /> Recalcular
             </Button>
           </div>
         </Card>

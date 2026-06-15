@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Activity, MapPin, Navigation, User, AlertTriangle, CheckCircle2, RefreshCcw, Loader2, Home } from 'lucide-react';
 import Link from 'next/link';
+import { doc, updateDoc, getFirestore } from 'firebase/firestore';
 
 export default function RegistroIncidentePage() {
   const [formData, setFormData] = useState({
@@ -52,6 +53,13 @@ export default function RegistroIncidentePage() {
       if (data.ok === true) {
         // Guardamos la información de la ambulancia. Si es un objeto, lo manejamos en el render.
         setAssignedAmbulance(data.ambulancia || '[Asignando...]');
+        if (data.ambulancia?.id) {
+          const db = getFirestore();
+          const ambulanciaRef = doc(db, 'ambulancias', data.ambulancia.id);
+          await updateDoc(ambulanciaRef, {
+            estado: 'OCUPADA'
+          });
+        }
         setStatus('success');
       } else if (data.ok === false) {
         setStatus('no-ambulance');
