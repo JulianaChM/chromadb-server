@@ -11,6 +11,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { db, useCollection } from '@/firebase';
 import { collection, doc, updateDoc, increment } from 'firebase/firestore';
+import { findBestDispatchAStar } from '@/lib/a-star';
+import { findBestDispatchBFS } from '@/lib/bfs';
 
 // Importación dinámica de Leaflet para evitar errores de SSR
 const MapContainer = dynamic(() => import('react-leaflet').then((mod) => mod.MapContainer), { ssr: false });
@@ -112,6 +114,27 @@ export default function DispatchMapPage() {
         setBestUnit(null);
       }
       return;
+    }
+
+    // Ejecución de comparativa de algoritmos A* y BFS
+    const availableAmbs = ambulancias.filter((a: any) => a.estado?.toUpperCase() === 'DISPONIBLE');
+    if (availableAmbs.length > 0) {
+      const bfsRes = findBestDispatchBFS(availableAmbs, currentIncident, hospitales);
+      const aStarRes = findBestDispatchAStar(availableAmbs, currentIncident, hospitales);
+
+      console.log("[BFS]");
+      console.log("ambulanciaElegida:", bfsRes?.ambulanciaElegida?.placa);
+      console.log("hospitalElegido:", bfsRes?.hospitalElegido?.nombre || bfsRes?.hospitalElegido?.name);
+      console.log("costoTotal:", bfsRes?.costoTotal);
+      console.log("nodosExplorados:", bfsRes?.nodosExplorados);
+      console.log("tiempoEjecucion:", bfsRes?.tiempoEjecucion, "ms");
+
+      console.log("[A*]");
+      console.log("ambulanciaElegida:", aStarRes?.ambulanciaElegida?.placa);
+      console.log("hospitalElegido:", aStarRes?.hospitalElegido?.nombre || aStarRes?.hospitalElegido?.name);
+      console.log("costoTotal:", aStarRes?.costoTotal);
+      console.log("nodosExplorados:", aStarRes?.nodosExplorados);
+      console.log("tiempoEjecucion:", aStarRes?.tiempoEjecucion, "ms");
     }
 
     const findBestRouteByETA = async () => {
