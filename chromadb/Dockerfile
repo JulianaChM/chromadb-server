@@ -1,7 +1,7 @@
 FROM python:3.11-slim
 
 # Instalar dependencias necesarias
-RUN pip install --no-cache-dir chromadb uvicorn
+RUN pip install --no-cache-dir chromadb fastapi uvicorn
 
 # Render detecta automáticamente el puerto 10000 por defecto
 EXPOSE 10000
