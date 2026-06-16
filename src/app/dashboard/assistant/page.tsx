@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { SendHorizonal, AlertTriangle } from 'lucide-react';
+import ReactMarkdown from 'react-markdown'; 
 
 interface Message {
   id: string;
@@ -18,28 +19,28 @@ interface Message {
 }
 
 async function askAssistant(question: string) {
-    const response = await fetch('/api/assistant', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ question }),
-    });
+  const response = await fetch('/api/assistant', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ question }),
+  });
 
-    const responseData = await response.json();
+  const responseData = await response.json();
 
-    if (!response.ok) {
-        // Si responseData está vacío, crea un objeto de error por defecto
-        if (Object.keys(responseData).length === 0) {
-            throw { 
-                error: 'Respuesta vacía del servidor', 
-                details: `El servidor respondió con un estado ${response.status} pero sin un cuerpo de error.` 
-            };
-        }
-        throw responseData; 
+  if (!response.ok) {
+    // Si responseData está vacío, crea un objeto de error por defecto
+    if (Object.keys(responseData).length === 0) {
+      throw {
+        error: 'Respuesta vacía del servidor',
+        details: `El servidor respondió con un estado ${response.status} pero sin un cuerpo de error.`
+      };
     }
+    throw responseData;
+  }
 
-    return responseData;
+  return responseData;
 }
 
 
@@ -69,7 +70,7 @@ export default function AssistantPage() {
 
     try {
       const response = await askAssistant(input);
-      
+
       const assistantMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
@@ -98,48 +99,48 @@ export default function AssistantPage() {
     <div className="flex flex-col h-full">
       <Card className="flex-grow flex flex-col">
         <CardHeader>
-          <CardTitle>Asistente de IA</CardTitle>
-          <CardDescription>Consulta el historial de incidentes para obtener información relevante.</CardDescription>
+          <CardTitle>CodeBlueAI - Asistente de Emergencias</CardTitle>
+          <CardDescription>Consulta protocolos, analiza incidentes y obtén recomendaciones urgentes.</CardDescription>
         </CardHeader>
         <CardContent className="flex-grow overflow-y-auto p-4 space-y-4">
           {messages.map((msg) => (
             <div key={msg.id} className={`flex items-start gap-3 ${msg.role === 'user' ? 'justify-end' : ''}`}>
-                {msg.role !== 'user' && (
-                    <Avatar>
-                        <AvatarFallback>{msg.role === 'error' ? <AlertTriangle className="text-red-500" /> : 'IA'}</AvatarFallback>
-                    </Avatar>
+              {msg.role !== 'user' && (
+                <Avatar>
+                  <AvatarFallback>{msg.role === 'error' ? <AlertTriangle className="text-red-500" /> : '🔵'}</AvatarFallback>
+                </Avatar>
+              )}
+              <div className={`rounded-lg px-4 py-2 max-w-[80%] ${msg.role === 'user' ? 'bg-primary text-primary-foreground' : msg.role === 'error' ? 'bg-destructive/10' : 'bg-muted'}`}>
+                {msg.role === 'assistant' || msg.role === 'error' ? (
+                  <div className="text-sm prose prose-sm dark:prose-invert max-w-none">
+                    <ReactMarkdown>
+                      {msg.content}
+                    </ReactMarkdown>
+                  </div>
+                ) : (
+                  <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
                 )}
-                <div className={`rounded-lg px-4 py-2 max-w-[80%] ${msg.role === 'user' ? 'bg-primary text-primary-foreground' : msg.role === 'error' ? 'bg-destructive/10' : 'bg-muted'}`}>
-                    <p className={`text-sm whitespace-pre-wrap ${msg.role === 'error' ? 'text-red-700 font-semibold' : ''}`}>{msg.content}</p>
-                    {msg.details && (
-                        <pre className="mt-2 p-2 bg-gray-700 text-white rounded-md text-xs overflow-x-auto whitespace-pre-wrap">
-                           {msg.details}
-                        </pre>
-                    )}
-                     {msg.stack && (
-                        <details className="mt-2 text-xs">
-                            <summary className="cursor-pointer text-gray-500">Ver stack de error</summary>
-                            <pre className="mt-1 p-2 bg-gray-800 text-gray-300 rounded-md overflow-x-auto whitespace-pre-wrap">
-                               {msg.stack}
-                            </pre>
-                        </details>
-                    )}
-                    <time className="text-xs text-muted-foreground float-right mt-1">
-                        {msg.timestamp.toLocaleTimeString()}
-                    </time>
-                    {msg.isRagResult && <span className="text-xs text-blue-500 block mt-1">✓ Obtenido del historial</span>}
-                </div>
-                {msg.role === 'user' && (
-                    <Avatar>
-                        <AvatarFallback>TÚ</AvatarFallback>
-                    </Avatar>
+                {msg.details && (
+                  <pre className="mt-2 p-2 bg-gray-700 text-white rounded-md text-xs overflow-x-auto whitespace-pre-wrap">
+                    {msg.details}
+                  </pre>
                 )}
+                <time className="text-xs text-muted-foreground float-right mt-1">
+                  {msg.timestamp.toLocaleTimeString()}
+                </time>
+                {msg.isRagResult && <span className="text-xs text-blue-500 block mt-1">✓ Obtenido del historial</span>}
+              </div>
+              {msg.role === 'user' && (
+                <Avatar>
+                  <AvatarFallback>👤</AvatarFallback>
+                </Avatar>
+              )}
             </div>
           ))}
-           {messages.length === 0 && (
+          {messages.length === 0 && (
             <div className="text-center text-muted-foreground mt-8">
-              <p>Haz una pregunta para comenzar.</p>
-              <p className="text-sm">Ej: "¿Hubo incidentes de tráfico cerca del hospital central el mes pasado?"</p>
+              <p>Bienvenido a CodeBlueAI</p>
+              <p className="text-sm">Ej: "¿Cuál es el protocolo para una emergencia cardíaca?" o "¿Hay incidentes críticos activos?"</p>
             </div>
           )}
         </CardContent>
