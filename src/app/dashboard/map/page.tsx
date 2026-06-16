@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect, useMemo } from 'react';
@@ -5,49 +6,45 @@ import dynamic from 'next/dynamic';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { CheckCircle2, RefreshCw, GitFork, ListChecks, MapPin, AlertCircle, Loader2, Truck } from 'lucide-react';
-import { findBestRoute, Point, RouteResult } from '@/lib/a-star';
+import { CheckCircle2, RefreshCw, GitFork, ListChecks, MapPin, AlertCircle, Loader2, Truck, Navigation, Clock, Ruler } from 'lucide-react';
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { mockEmergencies } from "@/app/lib/mock-data";
 import { db, useCollection } from '@/firebase';
-import { collection } from 'firebase/firestore';
+import { collection, doc, updateDoc, increment } from 'firebase/firestore';
+import { findBestDispatchAStar } from '@/lib/a-star';
+import { findBestDispatchBFS } from '@/lib/bfs';
 
 // Importación dinámica de Leaflet para evitar errores de SSR
-const MapContainer = dynamic(
-  () => import('react-leaflet').then((mod) => mod.MapContainer),
-  { ssr: false }
-);
-const TileLayer = dynamic(
-  () => import('react-leaflet').then((mod) => mod.TileLayer),
-  { ssr: false }
-);
-const Marker = dynamic(
-  () => import('react-leaflet').then((mod) => mod.Marker),
-  { ssr: false }
-);
-const Polyline = dynamic(
-  () => import('react-leaflet').then((mod) => mod.Polyline),
-  { ssr: false }
-);
-const Popup = dynamic(
-  () => import('react-leaflet').then((mod) => mod.Popup),
-  { ssr: false }
-);
+const MapContainer = dynamic(() => import('react-leaflet').then((mod) => mod.MapContainer), { ssr: false });
+const TileLayer = dynamic(() => import('react-leaflet').then((mod) => mod.TileLayer), { ssr: false });
+const Marker = dynamic(() => import('react-leaflet').then((mod) => mod.Marker), { ssr: false });
+const Polyline = dynamic(() => import('react-leaflet').then((mod) => mod.Polyline), { ssr: false });
+const Popup = dynamic(() => import('react-leaflet').then((mod) => mod.Popup), { ssr: false });
 
 const CENTER_LAT = 5.0689;
 const CENTER_LNG = -75.5174;
 
-const mapGridPointToLatLng = (p: Point): [number, number] => {
-  const scale = 0.0005;
-  return [CENTER_LAT + (p.y - 20) * scale, CENTER_LNG + (p.x - 20) * scale];
-};
+interface EvaluatedUnit {
+  ambulance: any;
+  duration: number;
+  distance: number;
+  hospital: any; // Este será el hospital pre-seleccionado por A*
+  points: [number, number][];
+}
 
 export default function DispatchMapPage() {
-  const [selectedEmergencyId, setSelectedEmergencyId] = useState<string | null>(null);
-  const [route, setRoute] = useState<RouteResult | null>(null);
-  const [isCalculating, setIsCalculating] = useState(false);
+  const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(null);
   const [leafletIcons, setLeafletIcons] = useState<any>(null);
+  const [isCalculating, setIsCalculating] = useState(false);
+  const [evaluatedUnits, setEvaluatedUnits] = useState<EvaluatedUnit[]>([]);
+  const [bestUnit, setBestUnit] = useState<EvaluatedUnit | null>(null);
+
+  // Estados para la simulación
+  const [isSimulating, setIsSimulating] = useState(false);
+  const [simulatingAmbulanceId, setSimulatingAmbulanceId] = useState<string | null>(null);
+  const [simulatedCoords, setSimulatedCoords] = useState<[number, number] | null>(null);
+  const [activeSimulationPoints, setActiveSimulationPoints] = useState<[number, number][]>([]);
+  const [simulationPhase, setSimulationPhase] = useState<'to-incident' | 'to-hospital' | 'idle'>('idle');
 
   // Consultas a Firestore en tiempo real
   const hospitalesRef = useMemo(() => collection(db, 'hospitales'), []);
@@ -56,239 +53,353 @@ export default function DispatchMapPage() {
   const ambulanciasRef = useMemo(() => collection(db, 'ambulancias'), []);
   const { data: ambulancias, loading: ambulanciasLoading } = useCollection(ambulanciasRef);
 
-  // Helper para obtener coordenadas de un documento de hospital
-  const getHospitalCoords = (hospital: any): [number, number] | null => {
-    const lat = hospital.coordinates?.latitude ?? hospital.latitude ?? hospital.lat;
-    const lng = hospital.coordinates?.longitude ?? hospital.longitude ?? hospital.lng;
-    
-    if (typeof lat === 'number' && typeof lng === 'number') {
-      return [lat, lng];
-    }
-    return null;
-  };
+  const incidentesRef = useMemo(() => collection(db, 'incidentes'), []);
+  const { data: incidentes, loading: incidentesLoading } = useCollection(incidentesRef);
 
-  const getHospitalName = (hospital: any) => hospital.nombre ?? hospital.name ?? 'Hospital';
-
-  // Telemetría de ambulancias en consola
-  useEffect(() => {
-    if (ambulancias) {
-      let renderizadas = 0;
-      let fallidas = 0;
-      ambulancias.forEach((amb: any) => {
-        if (typeof amb.lat === 'number' && typeof amb.lng === 'number') {
-          renderizadas++;
-        } else {
-          fallidas++;
-          console.warn(`[Ambulancia] La unidad con placa ${amb.placa} no tiene coordenadas válidas (lat/lng).`);
-        }
-      });
-      console.log(`[Sync] Ambulancias: ${ambulancias.length} cargadas, ${renderizadas} renderizadas, ${fallidas} fallidas.`);
-    }
-  }, [ambulancias]);
-
+  // Carga de iconos de Leaflet
   useEffect(() => {
     import('leaflet').then((L) => {
-      const emergencyIcon = L.divIcon({
-        html: `<div style="background-color: #1565C0; padding: 8px; border-radius: 50%; border: 3px solid white; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);">
-                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s-8-4.5-8-11.8A8 8 0 0 1 12 3a8 8 0 0 1 8 7.2c0 7.3-8 11.8-8 11.8z"/><circle cx="12" cy="10" r="3"/></svg>
-               </div>`,
-        className: '',
-        iconSize: [40, 40],
-        iconAnchor: [20, 20],
-      });
+      const incidentIcon = (status: string) => {
+        let color = "#1565C0"; // PENDIENTE (Azul)
+        const s = status?.toUpperCase();
+        if (s === 'EN_RUTA') color = "#eab308"; // EN_RUTA (Amarillo)
+        if (s === 'EN_PROCESO') color = "#ef4444"; // EN_PROCESO (Rojo)
+        
+        return L.divIcon({
+          html: `<div style="background-color: ${color}; padding: 8px; border-radius: 50%; border: 3px solid white; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); display: flex; align-items: center; justify-content: center;">
+                   <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s-8-4.5-8-11.8A8 8 0 0 1 12 3a8 8 0 0 1 8 7.2c0 7.3-8 11.8-8 11.8z"/><circle cx="12" cy="10" r="3"/></svg>
+                 </div>`,
+          className: '', iconSize: [40, 40], iconAnchor: [20, 20],
+        });
+      };
 
-      const hospitalIcon = (name: string) => L.divIcon({
-        html: `
-          <div class="flex flex-col items-center">
-            <span style="background: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; border: 1px solid #D32F2F; margin-bottom: 2px; white-space: nowrap; box-shadow: 0 2px 4px rgba(0,0,0,0.1); color: #D32F2F;">
-              ${name}
-            </span>
-            <div style="background-color: #D32F2F; padding: 8px; border-radius: 50%; border: 3px solid white; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);">
+      const hospitalIcon = (name: string, disponible: boolean) => L.divIcon({
+        html: `<div class="flex flex-col items-center">
+            <span style="background: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; border: 1px solid ${disponible ? '#2e7d32' : '#D32F2F'}; margin-bottom: 2px; white-space: nowrap; box-shadow: 0 2px 4px rgba(0,0,0,0.1); color: ${disponible ? '#2e7d32' : '#D32F2F'};">${name}</span>
+            <div style="background-color: ${disponible ? '#2e7d32' : '#D32F2F'}; padding: 8px; border-radius: 50%; border: 3px solid white; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);">
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
             </div>
           </div>`,
-        className: '',
-        iconSize: [120, 60],
-        iconAnchor: [60, 50],
+        className: '', iconSize: [120, 60], iconAnchor: [60, 50],
       });
 
       const ambulanceIcon = (status: string) => {
         let color = "#22c55e"; // Disponible
-        if (status?.toUpperCase() === 'EN RUTA') color = "#eab308"; // Amarillo
-        if (status?.toUpperCase() === 'OCUPADA') color = "#ef4444"; // Rojo
-
+        const s = status?.toUpperCase();
+        if (s === 'EN_RUTA' || s === 'EN RUTA' || s === 'DESPACHADA') color = "#eab308"; // Amarillo
+        if (s === 'OCUPADA') color = "#ef4444"; // Rojo
         return L.divIcon({
-          html: `
-            <div style="background-color: ${color}; padding: 6px; border-radius: 8px; border: 2px solid white; box-shadow: 0 4px 6px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center;">
+          html: `<div style="background-color: ${color}; padding: 6px; border-radius: 8px; border: 2px solid white; box-shadow: 0 4px 6px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center;">
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18h6a1 1 0 0 0 1-1V8.5L18.5 5H15"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>
               </svg>
             </div>`,
-          className: '',
-          iconSize: [38, 38],
-          iconAnchor: [19, 19],
+          className: '', iconSize: [38, 38], iconAnchor: [19, 19],
         });
       };
 
-      setLeafletIcons({ emergency: emergencyIcon, hospital: hospitalIcon, ambulance: ambulanceIcon });
+      setLeafletIcons({ incident: incidentIcon, hospital: hospitalIcon, ambulance: ambulanceIcon });
     });
   }, []);
 
-  const startPos: Point = { x: 10, y: 10 };
-  
-  const getEndPos = (emergencyId: string | null): Point => {
-    if (!emergencyId) return { x: 45, y: 32 };
-    const seed = (emergencyId || "").split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    return { x: 20 + (seed % 30), y: 15 + (seed % 25) };
-  };
+  const currentIncident = useMemo(() => {
+    if (!incidentes || !selectedIncidentId) return null;
+    return incidentes.find((i: any) => i.id === selectedIncidentId);
+  }, [incidentes, selectedIncidentId]);
 
-  const calculateAStar = () => {
-    if (!selectedEmergencyId) return;
-    setIsCalculating(true);
-    const endPos = getEndPos(selectedEmergencyId);
-    
-    setTimeout(() => {
-      const result = findBestRoute(startPos, endPos);
-      setRoute(result);
-      setIsCalculating(false);
-    }, 600);
-  };
-
+  // EFECTO PRINCIPAL: Búsqueda de Solución Óptima con A*
   useEffect(() => {
-    if (selectedEmergencyId) {
-      calculateAStar();
+    if (!currentIncident || !ambulancias || !hospitales || isSimulating) {
+      if (!isSimulating) {
+        setEvaluatedUnits([]);
+        setBestUnit(null);
+      }
+      return;
     }
-  }, [selectedEmergencyId]);
 
-  const polylinePath = useMemo(() => {
-    if (!route) return [];
-    return route.path.map(p => mapGridPointToLatLng(p));
-  }, [route]);
+    const availableAmbs = ambulancias.filter((a: any) => a.estado?.toUpperCase() === 'DISPONIBLE');
+
+    if (availableAmbs.length === 0) {
+      setEvaluatedUnits([]);
+      setBestUnit(null);
+      return;
+    }
+
+    // 1. Ejecutar Comparativa Académica (Logs solicitados)
+    const bfsRes = findBestDispatchBFS(availableAmbs, currentIncident, hospitales);
+    const aStarRes = findBestDispatchAStar(availableAmbs, currentIncident, hospitales);
+
+    if (bfsRes) {
+      console.log("[BFS]");
+      console.log("ambulanciaElegida:", bfsRes.ambulanciaElegida?.placa);
+      console.log("hospitalElegido:", bfsRes.hospitalElegido?.nombre);
+      console.log("costoTotal:", bfsRes.costoTotal);
+      console.log("nodosExplorados:", bfsRes.nodosExplorados);
+      console.log("tiempoEjecucion:", bfsRes.tiempoEjecucion, "ms");
+    }
+
+    if (aStarRes) {
+      console.log("[A* DESPACHO]");
+      console.log("ambulanciaElegida:", aStarRes.ambulanciaElegida?.placa);
+      console.log("hospitalElegido:", aStarRes.hospitalElegido?.nombre);
+      console.log("costoTotal:", aStarRes.costoTotal);
+      console.log("nodosExplorados:", aStarRes.nodosExplorados);
+      console.log("tiempoEjecucion:", aStarRes.tiempoEjecucion, "ms");
+
+      // 2. Utilizar A* para liderar la simulación y la interfaz
+      const solveWithAStar = async () => {
+        setIsCalculating(true);
+        try {
+          const amb = aStarRes.ambulanciaElegida;
+          const hosp = aStarRes.hospitalElegido;
+
+          // Solo pedimos OSRM para la ambulancia ganadora de A*
+          const url = `https://router.project-osrm.org/route/v1/driving/${amb.lng},${amb.lat};${currentIncident.lng},${currentIncident.lat}?overview=full&geometries=geojson`;
+          const response = await fetch(url);
+          const data = await response.json();
+
+          if (data.code === 'Ok' && data.routes.length > 0) {
+            const route = data.routes[0];
+            const unitData: EvaluatedUnit = {
+              ambulance: amb,
+              duration: route.duration / 60,
+              distance: route.distance / 1000,
+              points: route.geometry.coordinates.map((c: [number, number]) => [c[1], c[0]]),
+              hospital: hosp // Guardamos el hospital óptimo pre-seleccionado por A*
+            };
+            
+            setBestUnit(unitData);
+            setEvaluatedUnits([unitData]); // En este nuevo flujo, A* es el único que evaluamos visualmente
+          }
+        } catch (error) {
+          console.error("Error al obtener ruta real para decisión A*:", error);
+        } finally {
+          setIsCalculating(false);
+        }
+      };
+
+      solveWithAStar();
+    }
+
+  }, [currentIncident, ambulancias, hospitales, isSimulating]);
+
+  const handleConfirmDispatch = async () => {
+    if (!bestUnit || !selectedIncidentId || isSimulating || !currentIncident) return;
+
+    const incidentId = selectedIncidentId;
+    const ambulanceId = bestUnit.ambulance.id;
+    const hospitalDestino = bestUnit.hospital; // Usamos el hospital pre-seleccionado por A*
+    const initialRoute = [...bestUnit.points];
+    const incidentCoords = [currentIncident.lat, currentIncident.lng];
+
+    console.log(`[SIM] Iniciando despacho A* para incidente ${incidentId} con unidad ${bestUnit.ambulance.placa}`);
+    setIsSimulating(true);
+    setSimulatingAmbulanceId(ambulanceId);
+    setSimulatedCoords(initialRoute[0]);
+    setActiveSimulationPoints(initialRoute);
+    setSimulationPhase('to-incident');
+    
+    try {
+      const ambRef = doc(db, 'ambulancias', ambulanceId);
+      const incRef = doc(db, 'incidentes', incidentId);
+
+      // FASE 1: ACTUALIZACIÓN INICIAL - Ambulancia e Incidente "EN_RUTA"
+      await updateDoc(ambRef, { estado: 'EN_RUTA' });
+      await updateDoc(incRef, { 
+        estado: 'EN_RUTA',
+        ambulancia_id: ambulanceId,
+        ambulancia_placa: bestUnit.ambulance.placa
+      });
+
+      // Animación al incidente
+      await runAnimation(initialRoute, 50);
+
+      // FASE 2: LLEGADA AL INCIDENTE - Incidente "EN_PROCESO", Ambulancia "OCUPADA"
+      setSimulationPhase('to-hospital');
+      await updateDoc(incRef, { estado: 'EN_PROCESO' });
+      await updateDoc(ambRef, { 
+        estado: 'OCUPADA',
+        lat: incidentCoords[0],
+        lng: incidentCoords[1]
+      });
+
+      if (hospitalDestino) {
+        console.log(`[SIM] Trasladando al Hospital Óptimo (A*): ${hospitalDestino.nombre}.`);
+        const url = `https://router.project-osrm.org/route/v1/driving/${incidentCoords[1]},${incidentCoords[0]};${hospitalDestino.lng},${hospitalDestino.lat}?overview=full&geometries=geojson`;
+        const response = await fetch(url);
+        const hospitalRouteData = await response.json();
+
+        if (hospitalRouteData.code === 'Ok' && hospitalRouteData.routes.length > 0) {
+          const hospitalRoute = hospitalRouteData.routes[0].geometry.coordinates.map((c: [number, number]) => [c[1], c[0]]);
+          setActiveSimulationPoints(hospitalRoute);
+          
+          // Animar hacia el hospital
+          await runAnimation(hospitalRoute, 50);
+
+          // FASE 3: LLEGADA AL HOSPITAL - Incidente "COMPLETADO", Ambulancia "DISPONIBLE"
+          const hospitalRef = doc(db, 'hospitales', hospitalDestino.id);
+          
+          await updateDoc(incRef, { 
+            estado: 'COMPLETADO',
+            hospital_id: hospitalDestino.id,
+            finalizado_at: new Date().toISOString()
+          });
+
+          await updateDoc(hospitalRef, {
+            capacidad_disponible: increment(-1)
+          });
+          
+          await updateDoc(ambRef, {
+            estado: 'DISPONIBLE',
+            lat: hospitalDestino.lat,
+            lng: hospitalDestino.lng,
+            hospital_id: hospitalDestino.id
+          });
+        }
+      }
+
+      // Finalizar simulación
+      setTimeout(() => {
+        setIsSimulating(false);
+        setSimulatingAmbulanceId(null);
+        setSimulatedCoords(null);
+        setActiveSimulationPoints([]);
+        setSimulationPhase('idle');
+        setSelectedIncidentId(null);
+        setBestUnit(null);
+        setEvaluatedUnits([]);
+      }, 1500);
+
+    } catch (error) {
+      console.error("[SIM] Error crítico durante el flujo:", error);
+      setIsSimulating(false);
+    }
+  };
+
+  const runAnimation = (points: [number, number][], speed: number): Promise<void> => {
+    return new Promise((resolve) => {
+      let currentStep = 0;
+      const interval = setInterval(() => {
+        if (currentStep < points.length) {
+          setSimulatedCoords(points[currentStep]);
+          currentStep++;
+        } else {
+          clearInterval(interval);
+          resolve();
+        }
+      }, speed);
+    });
+  };
 
   return (
     <div className="flex flex-col lg:flex-row gap-6 h-[calc(100vh-10rem)] animate-in fade-in duration-700">
       <div className="flex-1 relative bg-slate-100 rounded-3xl overflow-hidden border-4 border-white shadow-inner shadow-slate-300 z-10">
         <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
         
-        <MapContainer 
-          center={[CENTER_LAT, CENTER_LNG]} 
-          zoom={14} 
-          style={{ height: '100%', width: '100%' }}
-        >
-          <TileLayer
-            attribution='&copy; OpenStreetMap contributors'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          />
+        <MapContainer center={[CENTER_LAT, CENTER_LNG]} zoom={14} style={{ height: '100%', width: '100%' }}>
+          <TileLayer attribution='&copy; OpenStreetMap contributors' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
           
-          {(hospitalesLoading || ambulanciasLoading) && (
+          {(hospitalesLoading || ambulanciasLoading || incidentesLoading || isCalculating) && !isSimulating && (
             <div className="absolute inset-0 z-[2000] bg-white/50 backdrop-blur-sm flex items-center justify-center">
-              <div className="flex flex-col items-center gap-2">
+              <div className="bg-white p-6 rounded-3xl shadow-2xl flex flex-col items-center gap-4">
                 <Loader2 className="h-10 w-10 text-primary animate-spin" />
-                <span className="text-xs font-bold text-slate-600">Sincronizando con Firestore...</span>
+                <p className="text-sm font-bold text-slate-800">
+                  {isCalculating ? "A* calculando solución óptima..." : "Sincronizando..."}
+                </p>
               </div>
             </div>
           )}
 
           {leafletIcons && (
             <>
-              {/* Marcador de Emergencia */}
-              <Marker position={mapGridPointToLatLng(startPos)} icon={leafletIcons.emergency}>
-                <Popup>Ubicación del Incidente</Popup>
-              </Marker>
-              
-              {/* Marcadores de Hospitales */}
               {hospitales?.map((hospital: any) => {
-                const coords = getHospitalCoords(hospital);
-                if (!coords) return null;
-
-                const name = getHospitalName(hospital);
-                const isAvailable = hospital.capacidad_disponible === true;
-
+                if (typeof hospital.lat !== 'number' || typeof hospital.lng !== 'number') return null;
                 return (
-                  <Marker key={hospital.id} position={coords} icon={leafletIcons.hospital(name)}>
+                  <Marker key={hospital.id} position={[hospital.lat, hospital.lng]} icon={leafletIcons.hospital(hospital.nombre || hospital.name, hospital.capacidad_disponible > 0)}>
                     <Popup>
-                      <div className="p-1 space-y-1 min-w-[150px]">
-                        <p className="font-bold text-slate-900 leading-tight">{name}</p>
-                        <p className="text-xs text-slate-500">{hospital.direccion || 'Sin dirección registrada'}</p>
-                        <div className="pt-2 border-t mt-2 flex items-center justify-between">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase">Disponibilidad</span>
-                          <Badge variant={isAvailable ? "secondary" : "destructive"} className="h-5 text-[10px] px-2 font-bold">
-                            {isAvailable ? 'SÍ' : 'NO'}
-                          </Badge>
-                        </div>
+                      <div className="p-2 space-y-1">
+                        <p className="font-bold text-slate-800">{hospital.nombre || hospital.name}</p>
+                        <Badge variant={hospital.capacidad_disponible > 0 ? "secondary" : "destructive"} className="text-[10px] font-bold">
+                          Capacidad: {hospital.capacidad_disponible}
+                        </Badge>
                       </div>
                     </Popup>
                   </Marker>
                 );
               })}
 
-              {/* Marcadores de Ambulancias posicionadas por sus propias coordenadas */}
               {ambulancias?.map((ambulance: any) => {
-                const lat = ambulance.lat;
-                const lng = ambulance.lng;
+                const isThisAmbulanceSimulating = isSimulating && simulatingAmbulanceId === ambulance.id;
+                const pos: [number, number] = isThisAmbulanceSimulating && simulatedCoords 
+                  ? simulatedCoords 
+                  : [ambulance.lat, ambulance.lng];
+
+                if (typeof pos[0] !== 'number' || typeof pos[1] !== 'number') return null;
                 
-                if (typeof lat !== 'number' || typeof lng !== 'number') return null;
-
-                const coords: [number, number] = [lat, lng];
-
-                // Buscamos el hospital base solo para mostrar el nombre en el popup
-                const baseHospital = hospitales?.find(h => h.id === ambulance.hospital_id);
-                const hospitalBaseName = baseHospital ? getHospitalName(baseHospital) : 'Sin base asignada';
+                let displayStatus = ambulance.estado;
+                if (isThisAmbulanceSimulating) {
+                  displayStatus = simulationPhase === 'to-incident' ? 'EN_RUTA' : 'OCUPADA';
+                }
 
                 return (
-                  <Marker 
-                    key={ambulance.id} 
-                    position={coords} 
-                    icon={leafletIcons.ambulance(ambulance.estado)}
-                  >
+                  <Marker key={ambulance.id} position={pos} icon={leafletIcons.ambulance(displayStatus)}>
                     <Popup>
-                      <div className="p-1 space-y-2">
-                        <div className="flex items-center gap-2 border-b pb-1">
-                          <Truck className="h-4 w-4 text-primary" />
-                          <p className="font-bold text-slate-900">Placa: {ambulance.placa}</p>
-                        </div>
-                        <div className="space-y-1">
-                          <div className="flex justify-between items-center text-[10px]">
-                            <span className="text-slate-500">Estado</span>
-                            <Badge className="h-4 px-1.5 border-none bg-slate-100 text-slate-700 font-bold uppercase">
-                              {ambulance.estado}
-                            </Badge>
-                          </div>
-                          <p className="text-[10px] text-slate-400">Base: <span className="text-slate-700 font-medium">{hospitalBaseName}</span></p>
-                        </div>
+                      <div className="p-2 space-y-1">
+                        <p className="font-bold text-slate-800">Unidad: {ambulance.placa}</p>
+                        <p className="text-xs">Estado: <span className="font-medium">{displayStatus}</span></p>
                       </div>
                     </Popup>
                   </Marker>
                 );
               })}
-            </>
-          )}
 
-          {polylinePath.length > 0 && (
-            <Polyline 
-              positions={polylinePath} 
-              pathOptions={{ color: '#1565C0', weight: 6, opacity: 0.8, dashArray: '8, 12', lineCap: 'round' }} 
-            />
+              {incidentes?.filter((inc: any) => inc.estado !== 'COMPLETADO').map((inc: any) => (
+                <Marker 
+                  key={inc.id} 
+                  position={[inc.lat, inc.lng]} 
+                  icon={leafletIcons.incident(inc.estado)}
+                >
+                  <Popup>
+                    <div className="p-2 space-y-1">
+                      <p className="font-bold text-slate-800">{inc.tipo_emergencia || 'Emergencia'}</p>
+                      <p className="text-xs">Estado: <span className="font-medium">{inc.estado}</span></p>
+                      <p className="text-xs italic text-slate-500">{inc.descripcion}</p>
+                    </div>
+                  </Popup>
+                </Marker>
+              ))}
+
+              {activeSimulationPoints.length > 0 && (
+                <Polyline 
+                  positions={activeSimulationPoints}
+                  pathOptions={{ 
+                    color: simulationPhase === 'to-hospital' ? '#ef4444' : '#eab308', 
+                    weight: 6, 
+                    opacity: 0.8, 
+                    lineJoin: 'round'
+                  }}
+                />
+              )}
+            </>
           )}
         </MapContainer>
 
         <div className="absolute top-6 left-6 z-[1000] w-72 space-y-3">
           <Card className="shadow-2xl border-none rounded-2xl bg-white/95 backdrop-blur">
             <CardHeader className="p-4 pb-2">
-              <CardTitle className="text-sm font-bold flex items-center gap-2">
-                <AlertCircle className="h-4 w-4 text-primary" />
-                Seleccionar Emergencia
+              <CardTitle className="text-sm font-bold flex items-center gap-2 text-slate-800">
+                <AlertCircle className="h-4 w-4 text-primary" /> Despacho Inteligente (A*)
               </CardTitle>
             </CardHeader>
             <CardContent className="p-4 pt-0">
-              <Select onValueChange={setSelectedEmergencyId}>
+              <Select onValueChange={setSelectedIncidentId} value={selectedIncidentId || undefined} disabled={isSimulating}>
                 <SelectTrigger className="rounded-xl border-slate-200">
-                  <SelectValue placeholder="Emergencias Activas" />
+                  <SelectValue placeholder="Seleccionar reporte" />
                 </SelectTrigger>
-                <SelectContent>
-                  {mockEmergencies.map(e => (
-                    <SelectItem key={e.id} value={e.id}>
-                      {e.id} - {e.patientCondition}
+                <SelectContent className="rounded-xl">
+                  {incidentes?.filter((inc: any) => inc.estado !== 'COMPLETADO')?.map((inc: any) => (
+                    <SelectItem key={inc.id} value={inc.id}>
+                      {inc.id} - {inc.tipo_emergencia || 'Emergencia'}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -299,83 +410,98 @@ export default function DispatchMapPage() {
       </div>
 
       <div className="w-full lg:w-96 flex flex-col gap-4">
-        <Card className="border-none shadow-xl rounded-3xl overflow-hidden flex flex-col flex-1">
+        <Card className="border-none shadow-xl rounded-3xl overflow-hidden flex flex-col flex-1 bg-white">
           <CardHeader className="bg-slate-50 border-b">
-            <CardTitle className="text-base font-bold flex items-center gap-2">
-              <GitFork className="h-4 w-4 text-primary" /> Inteligencia de Ruta (A*)
+            <CardTitle className="text-base font-bold flex items-center gap-2 text-slate-800">
+              <GitFork className="h-4 w-4 text-primary" /> Solución Óptima A*
             </CardTitle>
           </CardHeader>
           
           <ScrollArea className="flex-1">
             <CardContent className="p-6 space-y-6">
-              {!selectedEmergencyId ? (
+              {!selectedIncidentId ? (
                 <div className="text-center py-12 space-y-4">
                   <div className="bg-slate-100 h-16 w-16 rounded-full flex items-center justify-center mx-auto">
-                    <MapPin className="h-8 w-8 text-slate-400" />
+                    <Navigation className="h-8 w-8 text-slate-400" />
                   </div>
-                  <p className="text-sm text-slate-500 font-medium px-4">Seleccione una emergencia para calcular la trayectoria óptima.</p>
+                  <p className="text-sm text-slate-500 font-medium px-4">Seleccione una emergencia para que A* calcule la mejor respuesta.</p>
+                </div>
+              ) : isCalculating ? (
+                <div className="space-y-4 animate-pulse">
+                  {[1, 2, 3].map(i => (
+                    <div key={i} className="h-16 bg-slate-100 rounded-2xl w-full"></div>
+                  ))}
                 </div>
               ) : (
-                <div className="space-y-4">
-                  <div className="p-4 rounded-2xl bg-primary/5 border border-primary/10">
-                    <p className="text-[10px] font-bold text-primary uppercase tracking-widest mb-2">Análisis de Ruta</p>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-bold text-slate-800">Cálculo Optimizado</p>
-                        <p className="text-xs text-slate-500 italic">f(n) = g(n) + h(n)</p>
-                      </div>
-                      <Badge className="bg-green-100 text-green-700 border-none px-3">ÓPTIMO</Badge>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="p-4 rounded-2xl bg-slate-50 border text-center">
-                      <p className="text-2xl font-bold text-primary">{route?.estimatedTimeMinutes || '--'}</p>
-                      <p className="text-[10px] text-slate-400 font-bold uppercase">Minutos</p>
-                    </div>
-                    <div className="p-4 rounded-2xl bg-slate-50 border text-center">
-                      <p className="text-2xl font-bold text-primary">{route?.cost || '--'}</p>
-                      <p className="text-[10px] text-slate-400 font-bold uppercase">Coste A*</p>
-                    </div>
-                  </div>
-
-                  <div className="space-y-3">
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                      <ListChecks className="h-3 w-3" /> Puntos de Navegación
+                <div className="space-y-6">
+                  <div className={`p-4 rounded-2xl border transition-all duration-500 ${isSimulating ? 'bg-amber-50 border-amber-200 ring-2 ring-amber-100' : 'bg-primary/5 border-primary/20'}`}>
+                    <p className="text-[10px] font-bold uppercase tracking-widest mb-3 text-primary">
+                      {isSimulating ? `SIMULANDO: ${simulationPhase === 'to-incident' ? 'AL INCIDENTE' : 'TRASLADO HOSPITAL'}` : 'RECOMENDACIÓN A*'}
                     </p>
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between p-2 bg-slate-50 rounded-lg border border-slate-100 text-[10px] text-slate-600">
-                        <span className="font-bold">Origen</span>
-                        <span>GRID {startPos.x}, {startPos.y}</span>
+                    <div className="flex items-center justify-between mb-4">
+                      <div>
+                        <p className="font-bold text-slate-800 text-lg">
+                          {isSimulating ? (ambulancias?.find(a => a.id === simulatingAmbulanceId)?.placa) : bestUnit?.ambulance.placa}
+                        </p>
                       </div>
-                      <div className="flex items-center justify-between p-2 bg-primary/10 rounded-lg border border-primary/20 text-[10px] text-primary">
-                        <span className="font-bold">Destino</span>
-                        <span>GRID {getEndPos(selectedEmergencyId).x}, {getEndPos(selectedEmergencyId).y}</span>
-                      </div>
-                      <p className="text-[10px] text-center text-slate-400 mt-2">
-                        {polylinePath.length} nodos calculados dinámicamente.
-                      </p>
+                      <Badge className="bg-green-100 text-green-700 border-none px-3 font-bold">
+                        {isSimulating ? 'ACTIVA' : 'ÓPTIMA'}
+                      </Badge>
                     </div>
+
+                    <div className="grid grid-cols-2 gap-3 mb-4">
+                      <div className="bg-white p-3 rounded-xl border border-slate-100">
+                        <p className="text-[9px] font-bold text-slate-400 uppercase">Tiempo Est.</p>
+                        <p className="text-lg font-bold text-slate-800">
+                          {Math.round(bestUnit?.duration || 0) || '--'} min
+                        </p>
+                      </div>
+                      <div className="bg-white p-3 rounded-xl border border-slate-100">
+                        <p className="text-[9px] font-bold text-slate-400 uppercase">Distancia</p>
+                        <p className="text-lg font-bold text-slate-800">
+                          {bestUnit?.distance.toFixed(1) || '--'} km
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="bg-white p-4 rounded-xl border border-slate-100 space-y-1">
+                      <p className="text-[9px] font-bold text-slate-400 uppercase">Hospital Destino (A*)</p>
+                      <p className="text-sm font-bold text-slate-700 truncate">{bestUnit?.hospital?.nombre}</p>
+                    </div>
+
+                    {isSimulating && (
+                      <div className="mt-4 pt-4 border-t border-amber-200">
+                        <p className="text-xs font-bold text-amber-700 flex items-center gap-2">
+                           <Activity className="h-3 w-3 animate-pulse" />
+                           Estado: <span className="capitalize">{currentIncident?.estado || 'Procesando'}</span>
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="p-4 rounded-2xl border border-slate-100 bg-slate-50 space-y-2">
+                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Métricas del Algoritmo</p>
+                     <div className="flex justify-between text-xs">
+                        <span className="text-slate-500">Nodos explorados:</span>
+                        <span className="font-bold">{(incidentes && ambulancias && hospitales) ? findBestDispatchAStar(ambulancias.filter((a: any) => a.estado?.toUpperCase() === 'DISPONIBLE'), currentIncident, hospitales)?.nodosExplorados : '--'}</span>
+                     </div>
+                     <div className="flex justify-between text-xs">
+                        <span className="text-slate-500">Costo G (Euclidiano):</span>
+                        <span className="font-bold">{(incidentes && ambulancias && hospitales) ? findBestDispatchAStar(ambulancias.filter((a: any) => a.estado?.toUpperCase() === 'DISPONIBLE'), currentIncident, hospitales)?.costoTotal.toFixed(4) : '--'}</span>
+                     </div>
                   </div>
                 </div>
               )}
             </CardContent>
           </ScrollArea>
 
-          <div className="p-4 bg-slate-50 border-t space-y-2">
+          <div className="p-4 bg-white border-t">
              <Button 
-                disabled={!selectedEmergencyId}
-                className="w-full rounded-full bg-primary shadow-lg border-none py-6 font-bold flex items-center justify-center gap-2"
+                disabled={(!bestUnit && !isSimulating) || isCalculating || isSimulating}
+                onClick={handleConfirmDispatch}
+                className="w-full rounded-full bg-primary py-6 font-bold flex items-center justify-center gap-2 shadow-lg shadow-primary/20"
               >
-              <CheckCircle2 className="h-5 w-5" /> Confirmar Despacho
-            </Button>
-            <Button 
-              variant="outline" 
-              className="w-full rounded-full border-slate-200 py-6 font-bold flex items-center justify-center gap-2"
-              onClick={calculateAStar}
-              disabled={isCalculating || !selectedEmergencyId}
-            >
-              <RefreshCw className={`h-4 w-4 ${isCalculating ? 'animate-spin' : ''}`} /> Recalcular Trayectoria
+              {isSimulating ? <><Loader2 className="h-5 w-5 animate-spin" /> En Curso...</> : <><CheckCircle2 className="h-5 w-5" /> Iniciar Plan Óptimo A*</>}
             </Button>
           </div>
         </Card>
@@ -383,3 +509,23 @@ export default function DispatchMapPage() {
     </div>
   );
 }
+
+function Activity(props: any) {
+  return (
+    <svg
+      {...props}
+      xmlns="http://www.w3.org/2000/svg"
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+    </svg>
+  );
+}
+

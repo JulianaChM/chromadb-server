@@ -1,10 +1,13 @@
-import { retriever } from "./vector-store";
+import { getRetriever } from "./vector-store";
 import { llm } from "./models";
 import { Document } from "@langchain/core/documents";
 
 export async function queryIncidents(
   question: string
 ): Promise<{ answer: string; sourceDocuments: Document['metadata'][] }> {
+
+  // Obtiene el retriever de forma asíncrona
+  const retriever = await getRetriever();
 
   const docs = await retriever.invoke(question);
 

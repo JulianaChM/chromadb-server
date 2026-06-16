@@ -1,14 +1,12 @@
+
 import { initializeApp, getApps, cert, App, ServiceAccount } from 'firebase-admin/app';
 import { getFirestore, Firestore } from 'firebase-admin/firestore';
 
 /**
- * @fileOverview Inicialización de Firebase Admin SDK.
- * Se utiliza para operaciones de servidor como el RAG y la gestión de la base de datos de vectores.
+ * @fileOverview Inicialización segura de Firebase Admin SDK.
  */
 
-let app: App;
-
-// Obtener la lista de aplicaciones ya inicializadas para evitar duplicados en HMR
+let app: App | null = null;
 const apps = getApps();
 
 if (apps.length === 0) {
@@ -16,7 +14,6 @@ if (apps.length === 0) {
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
   const projectId = process.env.FIREBASE_PROJECT_ID;
 
-  // Solo inicializamos con certificado si tenemos las variables necesarias
   if (privateKey && clientEmail && projectId) {
     try {
       const serviceAccount: ServiceAccount = {
@@ -28,27 +25,28 @@ if (apps.length === 0) {
       app = initializeApp({
         credential: cert(serviceAccount),
       });
-      
-      console.log('Firebase Admin SDK inicializado exitosamente.');
+      console.log('✅ Firebase Admin SDK inicializado con credenciales.');
     } catch (error: any) {
-      console.error('Error al inicializar Firebase Admin con certificado:', error.message);
-      // Fallback a inicialización por defecto (útil en entornos de nube)
-      app = initializeApp();
+      console.error('❌ Error al inicializar Firebase Admin con certificado:', error.message);
+      try {
+        app = initializeApp();
+      } catch (e) {
+        app = null;
+      }
     }
   } else {
-    console.warn('Advertencia: Faltan variables de entorno de Firebase Admin. Inicializando app por defecto.');
-    // Inicialización por defecto (puede fallar si no hay credenciales de entorno de GCP)
     try {
-        app = initializeApp();
+      app = initializeApp();
+      console.log('ℹ️ Firebase Admin SDK inicializado con credenciales de entorno.');
     } catch (e) {
-        // Si todo falla, creamos una referencia nula controlada o lanzamos error descriptivo
-        console.error('No se pudo inicializar ninguna instancia de Firebase Admin.');
+      console.warn('⚠️ No se pudo inicializar Firebase Admin. Algunas funciones de IA (RAG) no estarán disponibles.');
+      app = null;
     }
   }
 } else {
   app = apps[0];
 }
 
-// Exportamos la instancia de Firestore
-// Nota: getFirestore() fallará si 'app' no se inicializó correctamente arriba.
-export const db: Firestore = getFirestore(app!);
+// Exportamos la instancia de Firestore de forma segura
+// Si app es null, se lanzará un error solo cuando se intente usar la DB, no al importar el módulo.
+export const db: Firestore = app ? getFirestore(app) : (null as unknown as Firestore);

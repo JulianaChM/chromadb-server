@@ -1,8 +1,7 @@
+
 import { ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings } from "@langchain/google-genai";
 
-if (!process.env.GEMINI_API_KEY) {
-    throw new Error("La variable de entorno GEMINI_API_KEY no está definida.");
-}
+const API_KEY = process.env.GEMINI_API_KEY || "AIzaSy_dummy_key_to_prevent_startup_crash";
 
 export const llm = new ChatGoogleGenerativeAI({
   model: "gemini-2.5-flash",
@@ -10,6 +9,14 @@ export const llm = new ChatGoogleGenerativeAI({
 });
 
 export const embeddings = new GoogleGenerativeAIEmbeddings({
-    apiKey: process.env.GEMINI_API_KEY,
-    model: "gemini-embedding-001",
+    apiKey: API_KEY,
+    model: "text-embedding-004",
 });
+
+export function checkApiKey() {
+    if (!process.env.GEMINI_API_KEY) {
+        console.warn("⚠️ La variable de entorno GEMINI_API_KEY no está definida. Las funciones de IA pueden fallar.");
+        return false;
+    }
+    return true;
+}
