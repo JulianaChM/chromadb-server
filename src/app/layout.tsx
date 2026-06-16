@@ -1,3 +1,4 @@
+
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
@@ -6,9 +7,11 @@ import { initializeApp } from '@/lib/ai/initializer';
 
 const inter = Inter({ subsets: ["latin"] });
 
-// Ejecuta la inicialización de la app al iniciar el servidor.
-// Esto asegura que el bootstrap de embeddings se ejecute una sola vez.
-await initializeApp();
+// Iniciamos la aplicación de forma asíncrona sin bloquear el renderizado del layout
+// Esto evita que el servidor se detenga si hay problemas de red o configuración inicial
+initializeApp().catch(err => {
+  console.error("Fallo crítico en la inicialización de la app:", err);
+});
 
 export const metadata: Metadata = {
   title: "Sistema de Gestión de Emergencias",

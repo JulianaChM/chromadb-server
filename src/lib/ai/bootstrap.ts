@@ -9,6 +9,11 @@ const embeddings = new GoogleGenerativeAIEmbeddings({
 });
 
 export async function bootstrapIncidentEmbeddings() {
+  if (!db) {
+    console.log("🟡 Saltando bootstrap: Firebase Admin no está inicializado.");
+    return;
+  }
+
   console.log("🚀 Iniciando proceso de bootstrap para embeddings de incidentes...");
 
   try {
@@ -16,12 +21,10 @@ export async function bootstrapIncidentEmbeddings() {
     const connection = await connect(dbPath);
     
     const tableNames = await connection.tableNames();
-    console.log("ℹ️ Tablas encontradas en LanceDB:", tableNames);
 
     let table;
     if (tableNames.includes('incidentes_vectors')) {
       table = await connection.openTable('incidentes_vectors');
-      console.log("✅ Tabla 'incidentes_vectors' abierta.");
     } else {
       console.log("🆕 Creando tabla 'incidentes_vectors'...");
       table = await connection.createTable('incidentes_vectors', [
@@ -32,22 +35,17 @@ export async function bootstrapIncidentEmbeddings() {
           metadata: JSON.stringify({ type: 'init' }) 
         }
       ]);
-      console.log("✅ Tabla 'incidentes_vectors' creada.");
     }
 
     const vectorStore = new LanceDB(embeddings, { table });
     
-    console.log("ℹ️ Consultando incidentes en Firestore...");
-    // Intentamos obtener los incidentes. 
-    // Nota: 'db' es la instancia de Firebase Admin
-    const incidentsSnapshot = await db.collection('incidentes').get();
+    // Intentamos obtener los incidentes.
+    const incidentsSnapshot = await db.collection('incidentes').limit(50).get();
 
     if (incidentsSnapshot.empty) {
       console.log("🟡 No se encontraron incidentes en Firestore para indexar.");
       return;
     }
-
-    console.log(`📊 Encontrados ${incidentsSnapshot.size} incidentes. Generando embeddings...`);
 
     const documents = incidentsSnapshot.docs.map((doc) => {
       const data = doc.data();
@@ -67,14 +65,12 @@ export async function bootstrapIncidentEmbeddings() {
           gravedad: data.prioridad || '',
           fecha: data.createdAt && typeof data.createdAt.toDate === 'function' 
             ? data.createdAt.toDate().toISOString() 
-            : (data.createdAt || new Date().toISOString()),
+            : new Date().toISOString(),
         }
       };
     });
 
-    // Agregamos los documentos al almacén de vectores
     await vectorStore.addDocuments(documents);
-
     console.log(`✅ Sincronización completada: ${documents.length} incidentes vectorizados.`);
 
   } catch (error) {
