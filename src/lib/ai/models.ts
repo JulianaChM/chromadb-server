@@ -1,10 +1,9 @@
 
 import { ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings } from "@langchain/google-genai";
 
-// Verificamos la clave de API solo cuando se intenta usar el modelo,
-// para evitar que el servidor falle al arrancar durante el build si no está definida.
+// Usamos modelos estándar conocidos para evitar errores durante el arranque del servidor.
 export const llm = new ChatGoogleGenerativeAI({
-  model: "gemini-2.5-flash",
+  model: "gemini-1.5-flash",
   apiKey: process.env.GEMINI_API_KEY || "temporary-key-to-prevent-startup-crash",
 });
 

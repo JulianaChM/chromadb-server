@@ -21,7 +21,6 @@ export default function EmergenciesPage() {
   const [isProcessing, setIsProcessing] = useState(false);
 
   const sendMessageToN8n = async (title: string, data: any) => {
-      // Simulación de envío a webhook
       console.log(`[SIM] Enviando a n8n: ${title}`, data);
       await new Promise(resolve => setTimeout(resolve, 1500));
       return { ok: true };
@@ -30,7 +29,6 @@ export default function EmergenciesPage() {
   const handleCreateEmergency = async () => {
     setIsProcessing(true);
     try {
-      // Simulación: Enviamos la descripción a n8n para pre-procesamiento LangChain/RAG
       await sendMessageToN8n("Nueva emergencia registrada", { type: 'registration' });
       toast({
         title: "Emergencia Registrada",
@@ -103,17 +101,12 @@ export default function EmergenciesPage() {
                   <Textarea id="condition" placeholder="Describe el incidente para que n8n identifique protocolos previos..." className="min-h-[100px]" />
                 </div>
               </div>
-
               <div className="space-y-4">
-                <h3 className="font-bold text-slate-800 border-b pb-2 flex items-center gap-2">
-                  <GitFork className="h-4 w-4" /> Triaje y Destino (A*)
-                </h3>
+                <h3 className="font-bold text-slate-800 border-b pb-2 flex items-center gap-2"><GitFork className="h-4 w-4" /> Triaje y Destino (A*)</h3>
                 <div className="space-y-2">
                   <Label htmlFor="priority">Nivel de Prioridad</Label>
                   <Select>
-                    <SelectTrigger id="priority">
-                      <SelectValue placeholder="Seleccione prioridad" />
-                    </SelectTrigger>
+                    <SelectTrigger id="priority"><SelectValue placeholder="Seleccione prioridad" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="low">Baja</SelectItem>
                       <SelectItem value="medium">Media</SelectItem>
@@ -126,11 +119,7 @@ export default function EmergenciesPage() {
             </div>
             <DialogFooter className="gap-2 sm:gap-0">
               <Button variant="outline" className="rounded-full">Cancelar</Button>
-              <Button 
-                className="rounded-full bg-primary border-none shadow-lg flex items-center gap-2"
-                onClick={handleCreateEmergency}
-                disabled={isProcessing}
-              >
+              <Button className="rounded-full bg-primary border-none shadow-lg flex items-center gap-2" onClick={handleCreateEmergency} disabled={isProcessing}>
                 <GitFork className="h-4 w-4" /> {isProcessing ? 'Procesando en n8n...' : 'Activar n8n & A*'}
               </Button>
             </DialogFooter>
@@ -143,17 +132,10 @@ export default function EmergenciesPage() {
           <div className="p-4 border-b bg-white flex flex-col md:flex-row justify-between items-center gap-4">
             <div className="relative w-full md:w-96">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-              <Input
-                placeholder="Buscar incidentes históricos (RAG)..."
-                className="pl-10 border-slate-200 rounded-full"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
+              <Input placeholder="Buscar incidentes históricos (RAG)..." className="pl-10 border-slate-200 rounded-full" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" className="rounded-full">
-                <Database className="mr-2 h-4 w-4" /> RAG History
-              </Button>
+              <Button variant="outline" size="sm" className="rounded-full"><Database className="mr-2 h-4 w-4" /> RAG History</Button>
             </div>
           </div>
           <div className="overflow-x-auto">
@@ -172,42 +154,23 @@ export default function EmergenciesPage() {
                 {mockEmergencies.map((emergency) => (
                   <TableRow key={emergency.id} className="hover:bg-slate-50/50">
                     <TableCell className="font-medium text-primary">#{emergency.id}</TableCell>
-                    <TableCell>
-                      <Badge className={`capitalize border-none ${priorityColors[emergency.priority]}`}>
-                        {emergency.priority}
-                      </Badge>
-                    </TableCell>
+                    <TableCell><Badge className={`capitalize border-none ${priorityColors[emergency.priority]}`}>{emergency.priority}</Badge></TableCell>
                     <TableCell>
                       <div>
                         <p className="font-bold text-slate-800">{emergency.patientName}</p>
                         <p className="text-xs text-muted-foreground">{emergency.patientCondition}</p>
                       </div>
                     </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1.5 text-slate-600">
-                        <MapPin className="h-3 w-3" />
-                        <span className="text-sm">{emergency.location}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={statusMap[emergency.status].variant}>
-                        {statusMap[emergency.status].label}
-                      </Badge>
-                    </TableCell>
+                    <TableCell><div className="flex items-center gap-1.5 text-slate-600"><MapPin className="h-3 w-3" /> <span className="text-sm">{emergency.location}</span></div></TableCell>
+                    <TableCell><Badge variant={statusMap[emergency.status].variant}>{statusMap[emergency.status].label}</Badge></TableCell>
                     <TableCell className="text-right">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="rounded-full">
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
+                          <Button variant="ghost" size="icon" className="rounded-full"><MoreHorizontal className="h-4 w-4" /></Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="rounded-xl">
-                          <DropdownMenuItem className="cursor-pointer">
-                            <Eye className="mr-2 h-4 w-4" /> Ver en Mapa (A*)
-                          </DropdownMenuItem>
-                          <DropdownMenuItem className="cursor-pointer">
-                            <FileText className="mr-2 h-4 w-4" /> Consultar RAG
-                          </DropdownMenuItem>
+                          <DropdownMenuItem className="cursor-pointer"><Eye className="mr-2 h-4 w-4" /> Ver en Mapa (A*)</DropdownMenuItem>
+                          <DropdownMenuItem className="cursor-pointer"><FileText className="mr-2 h-4 w-4" /> Consultar RAG</DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </TableCell>

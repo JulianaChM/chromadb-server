@@ -26,8 +26,6 @@ export default function RegistroIncidentePage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isGeolocating, setIsGeolocating] = useState(false);
   const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle');
-
-  // Coordenadas detectadas (si se usa GPS)
   const [coords, setCoords] = useState<{lat: number, lng: number} | null>(null);
 
   const handleGetLocation = () => {
@@ -44,8 +42,9 @@ export default function RegistroIncidentePage() {
         setCoords({ lat: latitude, lng: longitude });
 
         try {
-          // Geocodificación inversa para llenar el campo de dirección
-          const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`);
+          const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`, {
+            headers: { 'User-Agent': 'CodeBlueAI-App' }
+          });
           const data = await response.json();
           if (data.display_name) {
             setFormData(prev => ({ ...prev, direccion: data.display_name }));
@@ -73,10 +72,11 @@ export default function RegistroIncidentePage() {
     let longitude = coords?.lng || -75.5174;
 
     try {
-      // Si no tenemos coordenadas de GPS o si el usuario editó la dirección, geocodificamos el texto
       if (!coords) {
         const query = encodeURIComponent(`${formData.direccion}, Manizales, Caldas, Colombia`);
-        const geoResponse = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${query}&limit=1`);
+        const geoResponse = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${query}&limit=1`, {
+          headers: { 'User-Agent': 'CodeBlueAI-App' }
+        });
         const geoData = await geoResponse.json();
 
         if (geoData && geoData.length > 0) {
@@ -85,7 +85,6 @@ export default function RegistroIncidentePage() {
         }
       }
 
-      // 2. Crear el documento del incidente en Firestore
       const incidenteRef = await addDoc(collection(db, 'incidentes'), {
         descripcion: formData.descripcion,
         tipo_emergencia: formData.tipo_emergencia,
@@ -99,7 +98,6 @@ export default function RegistroIncidentePage() {
         createdAt: serverTimestamp(),
       });
 
-      // 3. Enviar a n8n para procesamiento secundario
       const body = {
         incidente_id: incidenteRef.id,
         tipo: "emergencia",
@@ -154,15 +152,9 @@ export default function RegistroIncidentePage() {
               </div>
             </div>
             <h2 className="text-2xl font-headline font-bold text-green-800">Emergencia Registrada</h2>
-            <p className="text-green-700">
-              El reporte ha sido enviado al centro de mando con geolocalización precisa. Estamos asignando una unidad.
-            </p>
-            <Button onClick={resetForm} className="w-full rounded-full bg-green-600 hover:bg-green-700">
-              Registrar otra emergencia
-            </Button>
-            <Link href="/" className="block text-sm text-green-600 font-medium hover:underline">
-              Volver al inicio
-            </Link>
+            <p className="text-green-700">El reporte ha sido enviado al centro de mando. Estamos asignando una unidad.</p>
+            <Button onClick={resetForm} className="w-full rounded-full bg-green-600 hover:bg-green-700">Registrar otra emergencia</Button>
+            <Link href="/" className="block text-sm text-green-600 font-medium hover:underline">Volver al inicio</Link>
           </CardContent>
         </Card>
       </div>
@@ -174,9 +166,7 @@ export default function RegistroIncidentePage() {
       <div className="max-w-2xl mx-auto space-y-8">
         <div className="text-center space-y-2">
           <Link href="/" className="flex items-center justify-center gap-2 mb-4">
-            <div className="bg-primary p-1.5 rounded-lg">
-              <Activity className="h-6 w-6 text-white" />
-            </div>
+            <div className="bg-primary p-1.5 rounded-lg"><Activity className="h-6 w-6 text-white" /></div>
             <span className="font-headline font-bold text-xl tracking-tight text-primary">CodeBlueAI</span>
           </Link>
           <h1 className="text-3xl font-headline font-bold text-slate-900 tracking-tight">Registro de Emergencia</h1>
@@ -191,32 +181,20 @@ export default function RegistroIncidentePage() {
         )}
 
         <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Bloque 1: Datos del Incidente */}
           <Card className="border-none shadow-sm rounded-3xl overflow-hidden">
             <CardHeader className="bg-slate-50 border-b">
-              <CardTitle className="text-lg flex items-center gap-2">
-                <AlertTriangle className="h-5 w-5 text-primary" /> Datos del Incidente
-              </CardTitle>
+              <CardTitle className="text-lg flex items-center gap-2 text-slate-800"><AlertTriangle className="h-5 w-5 text-primary" /> Datos del Incidente</CardTitle>
             </CardHeader>
             <CardContent className="p-6 space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="descripcion">Descripción del Incidente *</Label>
-                <Textarea 
-                  id="descripcion" 
-                  required
-                  placeholder="Ej: Accidente de tránsito, paciente inconsciente..."
-                  className="min-h-[120px] rounded-xl"
-                  value={formData.descripcion}
-                  onChange={(e) => setFormData({...formData, descripcion: e.target.value})}
-                />
+                <Textarea id="descripcion" required placeholder="Ej: Accidente de tránsito, paciente inconsciente..." className="min-h-[120px] rounded-xl" value={formData.descripcion} onChange={(e) => setFormData({...formData, descripcion: e.target.value})} />
               </div>
               <div className="grid md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="tipo">Tipo de Emergencia *</Label>
                   <Select required onValueChange={(val) => setFormData({...formData, tipo_emergencia: val})}>
-                    <SelectTrigger className="rounded-xl">
-                      <SelectValue placeholder="Seleccione tipo" />
-                    </SelectTrigger>
+                    <SelectTrigger className="rounded-xl"><SelectValue placeholder="Seleccione tipo" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="Trauma">Trauma</SelectItem>
                       <SelectItem value="Cardiovascular">Cardiovascular</SelectItem>
@@ -229,9 +207,7 @@ export default function RegistroIncidentePage() {
                 <div className="space-y-2">
                   <Label htmlFor="prioridad">Prioridad *</Label>
                   <Select required onValueChange={(val) => setFormData({...formData, prioridad: val})}>
-                    <SelectTrigger className="rounded-xl">
-                      <SelectValue placeholder="Seleccione prioridad" />
-                    </SelectTrigger>
+                    <SelectTrigger className="rounded-xl"><SelectValue placeholder="Seleccione prioridad" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="NORMAL" className="text-green-600 font-bold">NORMAL</SelectItem>
                       <SelectItem value="MODERADO" className="text-yellow-600 font-bold">MODERADO</SelectItem>
@@ -244,46 +220,27 @@ export default function RegistroIncidentePage() {
             </CardContent>
           </Card>
 
-          {/* Bloque 2: Paciente */}
           <Card className="border-none shadow-sm rounded-3xl overflow-hidden">
             <CardHeader className="bg-slate-50 border-b">
-              <CardTitle className="text-lg flex items-center gap-2">
-                <User className="h-5 w-5 text-primary" /> Paciente
-              </CardTitle>
+              <CardTitle className="text-lg flex items-center gap-2 text-slate-800"><User className="h-5 w-5 text-primary" /> Paciente</CardTitle>
             </CardHeader>
             <CardContent className="p-6 space-y-4">
               <div className="grid md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="nombre">Nombre</Label>
-                  <Input 
-                    id="nombre"
-                    placeholder="Nombre completo"
-                    className="rounded-xl"
-                    value={formData.nombre_paciente}
-                    onChange={(e) => setFormData({...formData, nombre_paciente: e.target.value})}
-                  />
+                  <Input id="nombre" placeholder="Nombre completo" className="rounded-xl" value={formData.nombre_paciente} onChange={(e) => setFormData({...formData, nombre_paciente: e.target.value})} />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="edad">Edad aprox.</Label>
-                  <Input 
-                    id="edad"
-                    type="number"
-                    placeholder="Edad"
-                    className="rounded-xl"
-                    value={formData.edad_aproximada}
-                    onChange={(e) => setFormData({...formData, edad_aproximada: e.target.value})}
-                  />
+                  <Input id="edad" type="number" placeholder="Edad" className="rounded-xl" value={formData.edad_aproximada} onChange={(e) => setFormData({...formData, edad_aproximada: e.target.value})} />
                 </div>
               </div>
             </CardContent>
           </Card>
 
-          {/* Bloque 3: Ubicación */}
           <Card className="border-none shadow-sm rounded-3xl overflow-hidden">
             <CardHeader className="bg-slate-50 border-b">
-              <CardTitle className="text-lg flex items-center gap-2">
-                <MapPin className="h-5 w-5 text-primary" /> Ubicación
-              </CardTitle>
+              <CardTitle className="text-lg flex items-center gap-2 text-slate-800"><MapPin className="h-5 w-5 text-primary" /> Ubicación</CardTitle>
             </CardHeader>
             <CardContent className="p-6 space-y-4">
               <div className="space-y-4">
@@ -291,58 +248,25 @@ export default function RegistroIncidentePage() {
                   <Label htmlFor="direccion">Indique la Dirección Exacta *</Label>
                   <div className="relative">
                     <Home className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                    <Input 
-                      id="direccion" 
-                      required
-                      placeholder="Calle, Carrera, Barrio o Punto de referencia en Manizales" 
-                      className="pl-10 h-11 rounded-xl"
-                      value={formData.direccion}
-                      onChange={(e) => {
-                        setFormData({...formData, direccion: e.target.value});
-                        setCoords(null); // Si el usuario escribe, invalidamos el GPS manual
-                      }}
-                    />
+                    <Input id="direccion" required placeholder="Calle, Carrera, Barrio o Punto de referencia en Manizales" className="pl-10 h-11 rounded-xl" value={formData.direccion} onChange={(e) => { setFormData({...formData, direccion: e.target.value}); setCoords(null); }} />
                   </div>
                 </div>
-
                 <div className="flex items-center gap-2">
                   <div className="h-px bg-slate-200 flex-1"></div>
                   <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">O usa tu GPS</span>
                   <div className="h-px bg-slate-200 flex-1"></div>
                 </div>
-
-                <Button 
-                  type="button"
-                  variant="outline"
-                  className="w-full rounded-xl flex items-center gap-2 h-11 border-primary/20 hover:bg-primary/5 text-primary"
-                  onClick={handleGetLocation}
-                  disabled={isGeolocating}
-                >
-                  {isGeolocating ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Navigation className="h-4 w-4" />
-                  )}
+                <Button type="button" variant="outline" className="w-full rounded-xl flex items-center gap-2 h-11 border-primary/20 hover:bg-primary/5 text-primary" onClick={handleGetLocation} disabled={isGeolocating}>
+                  {isGeolocating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Navigation className="h-4 w-4" />}
                   {isGeolocating ? 'Obteniendo coordenadas...' : 'Usar mi ubicación actual'}
                 </Button>
-
                 <p className="text-[10px] text-slate-400 font-medium text-center">El sistema geolocalizará este punto automáticamente.</p>
               </div>
             </CardContent>
           </Card>
 
-          <Button 
-            type="submit" 
-            className="w-full py-8 text-lg font-bold rounded-2xl shadow-xl bg-red-600 hover:bg-red-700 transition-all hover:scale-[1.01] active:scale-[0.99] disabled:bg-slate-300"
-            disabled={!isFormValid || isSubmitting}
-          >
-            {isSubmitting ? (
-              <>
-                <Loader2 className="mr-2 h-6 w-6 animate-spin" /> Geocalizando y reportando...
-              </>
-            ) : (
-              'REPORTAR EMERGENCIA'
-            )}
+          <Button type="submit" className="w-full py-8 text-lg font-bold rounded-2xl shadow-xl bg-red-600 hover:bg-red-700 transition-all hover:scale-[1.01] active:scale-[0.99] disabled:bg-slate-300" disabled={!isFormValid || isSubmitting}>
+            {isSubmitting ? <><Loader2 className="mr-2 h-6 w-6 animate-spin" /> Geocalizando y reportando...</> : 'REPORTAR EMERGENCIA'}
           </Button>
         </form>
       </div>
