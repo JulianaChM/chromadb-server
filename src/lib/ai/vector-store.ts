@@ -8,11 +8,11 @@ const dbPath = process.env.LANCEDB_PATH || "lancedb.db";
 let vectorStore: LanceDB;
 
 async function initializeVectorStore() {
-    const connection = await connect(dbPath);
-    
-    let table;
     try {
+        const connection = await connect(dbPath);
         const tableNames = await connection.tableNames();
+        
+        let table;
         if (tableNames.includes("incidentes_vectors")) {
             table = await connection.openTable("incidentes_vectors");
         } else {
@@ -20,12 +20,12 @@ async function initializeVectorStore() {
                 { vector: Array(768).fill(0), text: "init", id: "0", metadata: {} }
             ]);
         }
+        
+        vectorStore = new LanceDB(embeddings, { table });
     } catch (e) {
-        console.error("Error al abrir/crear tabla en LanceDB:", e);
+        console.error("Error al inicializar LanceDB:", e);
         throw e;
     }
-    
-    vectorStore = new LanceDB(embeddings, { table });
 }
 
 export async function getVectorStore(): Promise<LanceDB> {

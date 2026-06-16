@@ -39,7 +39,7 @@ export async function bootstrapIncidentEmbeddings() {
 
     const vectorStore = new LanceDB(embeddings, { table });
     
-    // Usamos el SDK de Admin que tiene .collection()
+    // Usamos el SDK de Admin para obtener los incidentes
     const incidentsSnapshot = await (db as any).collection('incidentes').limit(50).get();
 
     if (incidentsSnapshot.empty) {
