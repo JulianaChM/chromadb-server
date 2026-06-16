@@ -13,6 +13,7 @@ import { db, useCollection } from '@/firebase';
 import { collection, doc, updateDoc, increment } from 'firebase/firestore';
 import { findBestDispatchAStar } from '@/lib/a-star';
 import { findBestDispatchBFS } from '@/lib/bfs';
+import { notifyN8nWebhook } from '@/lib/n8n-webhook';
 
 // Importación dinámica de Leaflet para evitar errores de SSR
 const MapContainer = dynamic(() => import('react-leaflet').then((mod) => mod.MapContainer), { ssr: false });
@@ -64,7 +65,7 @@ export default function DispatchMapPage() {
         const s = status?.toUpperCase();
         if (s === 'EN_RUTA') color = "#eab308"; // EN_RUTA (Amarillo)
         if (s === 'EN_PROCESO') color = "#ef4444"; // EN_PROCESO (Rojo)
-        
+
         return L.divIcon({
           html: `<div style="background-color: ${color}; padding: 8px; border-radius: 50%; border: 3px solid white; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); display: flex; align-items: center; justify-content: center;">
                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s-8-4.5-8-11.8A8 8 0 0 1 12 3a8 8 0 0 1 8 7.2c0 7.3-8 11.8-8 11.8z"/><circle cx="12" cy="10" r="3"/></svg>
@@ -167,7 +168,7 @@ export default function DispatchMapPage() {
               points: route.geometry.coordinates.map((c: [number, number]) => [c[1], c[0]]),
               hospital: hosp // Guardamos el hospital óptimo pre-seleccionado por A*
             };
-            
+
             setBestUnit(unitData);
             setEvaluatedUnits([unitData]); // En este nuevo flujo, A* es el único que evaluamos visualmente
           }
@@ -198,17 +199,31 @@ export default function DispatchMapPage() {
     setSimulatedCoords(initialRoute[0]);
     setActiveSimulationPoints(initialRoute);
     setSimulationPhase('to-incident');
-    
+
     try {
       const ambRef = doc(db, 'ambulancias', ambulanceId);
       const incRef = doc(db, 'incidentes', incidentId);
 
       // FASE 1: ACTUALIZACIÓN INICIAL - Ambulancia e Incidente "EN_RUTA"
       await updateDoc(ambRef, { estado: 'EN_RUTA' });
-      await updateDoc(incRef, { 
+      await updateDoc(incRef, {
         estado: 'EN_RUTA',
         ambulancia_id: ambulanceId,
         ambulancia_placa: bestUnit.ambulance.placa
+      });
+
+      // 📤 Notificar a n8n - FASE 1
+      await notifyN8nWebhook({
+        tipo: 'ACTUALIZAR',
+        estado: 'EN_RUTA',
+        incidente_id: incidentId,
+        descripcion: currentIncident.descripcion,
+        prioridad: currentIncident.prioridad,
+        ambulancia_placa: bestUnit.ambulance.placa,
+        nombre_paciente: currentIncident.nombre_paciente,
+        lat: currentIncident.lat,
+        lng: currentIncident.lng,
+        creado_en: currentIncident.creado_en?.toISOString?.() || currentIncident.creado_en
       });
 
       // Animación al incidente
@@ -217,10 +232,24 @@ export default function DispatchMapPage() {
       // FASE 2: LLEGADA AL INCIDENTE - Incidente "EN_PROCESO", Ambulancia "OCUPADA"
       setSimulationPhase('to-hospital');
       await updateDoc(incRef, { estado: 'EN_PROCESO' });
-      await updateDoc(ambRef, { 
+      await updateDoc(ambRef, {
         estado: 'OCUPADA',
         lat: incidentCoords[0],
         lng: incidentCoords[1]
+      });
+
+      // 📤 Notificar a n8n - FASE 2
+      await notifyN8nWebhook({
+        tipo: 'ACTUALIZAR',
+        estado: 'EN_PROCESO',
+        incidente_id: incidentId,
+        descripcion: currentIncident.descripcion,
+        prioridad: currentIncident.prioridad,
+        ambulancia_placa: bestUnit.ambulance.placa,
+        nombre_paciente: currentIncident.nombre_paciente,
+        lat: incidentCoords[0],
+        lng: incidentCoords[1],
+        creado_en: currentIncident.creado_en?.toISOString?.() || currentIncident.creado_en
       });
 
       if (hospitalDestino) {
@@ -232,14 +261,14 @@ export default function DispatchMapPage() {
         if (hospitalRouteData.code === 'Ok' && hospitalRouteData.routes.length > 0) {
           const hospitalRoute = hospitalRouteData.routes[0].geometry.coordinates.map((c: [number, number]) => [c[1], c[0]]);
           setActiveSimulationPoints(hospitalRoute);
-          
+
           // Animar hacia el hospital
           await runAnimation(hospitalRoute, 50);
 
           // FASE 3: LLEGADA AL HOSPITAL - Incidente "COMPLETADO", Ambulancia "DISPONIBLE"
           const hospitalRef = doc(db, 'hospitales', hospitalDestino.id);
-          
-          await updateDoc(incRef, { 
+
+          await updateDoc(incRef, {
             estado: 'COMPLETADO',
             hospital_id: hospitalDestino.id,
             finalizado_at: new Date().toISOString()
@@ -248,12 +277,27 @@ export default function DispatchMapPage() {
           await updateDoc(hospitalRef, {
             capacidad_disponible: increment(-1)
           });
-          
+
           await updateDoc(ambRef, {
             estado: 'DISPONIBLE',
             lat: hospitalDestino.lat,
             lng: hospitalDestino.lng,
             hospital_id: hospitalDestino.id
+          });
+
+          // 📤 Notificar a n8n - FASE 3
+          await notifyN8nWebhook({
+            tipo: 'ACTUALIZAR',
+            estado: 'COMPLETADO',
+            incidente_id: incidentId,
+            descripcion: currentIncident.descripcion,
+            prioridad: currentIncident.prioridad,
+            ambulancia_placa: bestUnit.ambulance.placa,
+            nombre_paciente: currentIncident.nombre_paciente,
+            lat: hospitalDestino.lat,
+            lng: hospitalDestino.lng,
+            hospital_nombre: hospitalDestino.nombre,
+            creado_en: currentIncident.creado_en?.toISOString?.() || currentIncident.creado_en
           });
         }
       }
@@ -295,10 +339,10 @@ export default function DispatchMapPage() {
     <div className="flex flex-col lg:flex-row gap-6 h-[calc(100vh-10rem)] animate-in fade-in duration-700">
       <div className="flex-1 relative bg-slate-100 rounded-3xl overflow-hidden border-4 border-white shadow-inner shadow-slate-300 z-10">
         <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-        
+
         <MapContainer center={[CENTER_LAT, CENTER_LNG]} zoom={14} style={{ height: '100%', width: '100%' }}>
           <TileLayer attribution='&copy; OpenStreetMap contributors' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-          
+
           {(hospitalesLoading || ambulanciasLoading || incidentesLoading || isCalculating) && !isSimulating && (
             <div className="absolute inset-0 z-[2000] bg-white/50 backdrop-blur-sm flex items-center justify-center">
               <div className="bg-white p-6 rounded-3xl shadow-2xl flex flex-col items-center gap-4">
@@ -330,12 +374,12 @@ export default function DispatchMapPage() {
 
               {ambulancias?.map((ambulance: any) => {
                 const isThisAmbulanceSimulating = isSimulating && simulatingAmbulanceId === ambulance.id;
-                const pos: [number, number] = isThisAmbulanceSimulating && simulatedCoords 
-                  ? simulatedCoords 
+                const pos: [number, number] = isThisAmbulanceSimulating && simulatedCoords
+                  ? simulatedCoords
                   : [ambulance.lat, ambulance.lng];
 
                 if (typeof pos[0] !== 'number' || typeof pos[1] !== 'number') return null;
-                
+
                 let displayStatus = ambulance.estado;
                 if (isThisAmbulanceSimulating) {
                   displayStatus = simulationPhase === 'to-incident' ? 'EN_RUTA' : 'OCUPADA';
@@ -354,9 +398,9 @@ export default function DispatchMapPage() {
               })}
 
               {incidentes?.filter((inc: any) => inc.estado !== 'COMPLETADO').map((inc: any) => (
-                <Marker 
-                  key={inc.id} 
-                  position={[inc.lat, inc.lng]} 
+                <Marker
+                  key={inc.id}
+                  position={[inc.lat, inc.lng]}
                   icon={leafletIcons.incident(inc.estado)}
                 >
                   <Popup>
@@ -370,12 +414,12 @@ export default function DispatchMapPage() {
               ))}
 
               {activeSimulationPoints.length > 0 && (
-                <Polyline 
+                <Polyline
                   positions={activeSimulationPoints}
-                  pathOptions={{ 
-                    color: simulationPhase === 'to-hospital' ? '#ef4444' : '#eab308', 
-                    weight: 6, 
-                    opacity: 0.8, 
+                  pathOptions={{
+                    color: simulationPhase === 'to-hospital' ? '#ef4444' : '#eab308',
+                    weight: 6,
+                    opacity: 0.8,
                     lineJoin: 'round'
                   }}
                 />
@@ -399,7 +443,7 @@ export default function DispatchMapPage() {
                 <SelectContent className="rounded-xl">
                   {incidentes?.filter((inc: any) => inc.estado !== 'COMPLETADO')?.map((inc: any) => (
                     <SelectItem key={inc.id} value={inc.id}>
-                      {inc.id} - {inc.tipo_emergencia || 'Emergencia'}
+                      {inc.nombre_paciente || 'Sin nombre'} - {inc.descripcion || 'Sin descripción'}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -416,7 +460,7 @@ export default function DispatchMapPage() {
               <GitFork className="h-4 w-4 text-primary" /> Solución Óptima A*
             </CardTitle>
           </CardHeader>
-          
+
           <ScrollArea className="flex-1">
             <CardContent className="p-6 space-y-6">
               {!selectedIncidentId ? (
@@ -472,23 +516,23 @@ export default function DispatchMapPage() {
                     {isSimulating && (
                       <div className="mt-4 pt-4 border-t border-amber-200">
                         <p className="text-xs font-bold text-amber-700 flex items-center gap-2">
-                           <Activity className="h-3 w-3 animate-pulse" />
-                           Estado: <span className="capitalize">{currentIncident?.estado || 'Procesando'}</span>
+                          <Activity className="h-3 w-3 animate-pulse" />
+                          Estado: <span className="capitalize">{currentIncident?.estado || 'Procesando'}</span>
                         </p>
                       </div>
                     )}
                   </div>
 
                   <div className="p-4 rounded-2xl border border-slate-100 bg-slate-50 space-y-2">
-                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Métricas del Algoritmo</p>
-                     <div className="flex justify-between text-xs">
-                        <span className="text-slate-500">Nodos explorados:</span>
-                        <span className="font-bold">{(incidentes && ambulancias && hospitales) ? findBestDispatchAStar(ambulancias.filter((a: any) => a.estado?.toUpperCase() === 'DISPONIBLE'), currentIncident, hospitales)?.nodosExplorados : '--'}</span>
-                     </div>
-                     <div className="flex justify-between text-xs">
-                        <span className="text-slate-500">Costo G (Euclidiano):</span>
-                        <span className="font-bold">{(incidentes && ambulancias && hospitales) ? findBestDispatchAStar(ambulancias.filter((a: any) => a.estado?.toUpperCase() === 'DISPONIBLE'), currentIncident, hospitales)?.costoTotal.toFixed(4) : '--'}</span>
-                     </div>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Métricas del Algoritmo</p>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-slate-500">Nodos explorados:</span>
+                      <span className="font-bold">{(incidentes && ambulancias && hospitales) ? findBestDispatchAStar(ambulancias.filter((a: any) => a.estado?.toUpperCase() === 'DISPONIBLE'), currentIncident, hospitales)?.nodosExplorados : '--'}</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-slate-500">Costo G (Euclidiano):</span>
+                      <span className="font-bold">{(incidentes && ambulancias && hospitales) ? findBestDispatchAStar(ambulancias.filter((a: any) => a.estado?.toUpperCase() === 'DISPONIBLE'), currentIncident, hospitales)?.costoTotal.toFixed(4) : '--'}</span>
+                    </div>
                   </div>
                 </div>
               )}
@@ -496,11 +540,11 @@ export default function DispatchMapPage() {
           </ScrollArea>
 
           <div className="p-4 bg-white border-t">
-             <Button 
-                disabled={(!bestUnit && !isSimulating) || isCalculating || isSimulating}
-                onClick={handleConfirmDispatch}
-                className="w-full rounded-full bg-primary py-6 font-bold flex items-center justify-center gap-2 shadow-lg shadow-primary/20"
-              >
+            <Button
+              disabled={(!bestUnit && !isSimulating) || isCalculating || isSimulating}
+              onClick={handleConfirmDispatch}
+              className="w-full rounded-full bg-primary py-6 font-bold flex items-center justify-center gap-2 shadow-lg shadow-primary/20"
+            >
               {isSimulating ? <><Loader2 className="h-5 w-5 animate-spin" /> En Curso...</> : <><CheckCircle2 className="h-5 w-5" /> Iniciar Plan Óptimo A*</>}
             </Button>
           </div>

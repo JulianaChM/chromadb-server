@@ -26,7 +26,7 @@ export default function RegistroIncidentePage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isGeolocating, setIsGeolocating] = useState(false);
   const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle');
-  const [coords, setCoords] = useState<{lat: number, lng: number} | null>(null);
+  const [coords, setCoords] = useState<{ lat: number, lng: number } | null>(null);
 
   const handleGetLocation = () => {
     setIsGeolocating(true);
@@ -68,7 +68,7 @@ export default function RegistroIncidentePage() {
     setIsSubmitting(true);
     setStatus('idle');
 
-    let latitude = coords?.lat || 5.0689; 
+    let latitude = coords?.lat || 5.0689;
     let longitude = coords?.lng || -75.5174;
 
     try {
@@ -111,11 +111,36 @@ export default function RegistroIncidentePage() {
         lng: longitude
       };
 
-      await fetch('https://linita22-3.app.n8n.cloud/webhook-test/emergencias', {
+      // Enviar a n8n y capturar respuesta
+      const n8nResponse = await fetch('https://linita22-3.app.n8n.cloud/webhook/emergencias', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
+
+      const n8nData = await n8nResponse.json();
+      console.log('📥 Respuesta de n8n:', n8nData);
+
+      // Si n8n devolvió datos válidos, vectorizar e indexar
+      if (n8nData.ok && n8nData.incidente) {
+        try {
+          const vectorizeResponse = await fetch('/api/incidents/vectorize', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              incidente_id: n8nData.incidente_id,
+              incidente: n8nData.incidente,
+              mensaje: n8nData.mensaje,
+            }),
+          });
+
+          const vectorResult = await vectorizeResponse.json();
+          console.log('✨ Incidente vectorizado:', vectorResult);
+        } catch (error) {
+          console.error('⚠️ Error al vectorizar:', error);
+          // No fallar el flujo si la vectorización falla
+        }
+      }
 
       setStatus('success');
     } catch (error) {
@@ -188,12 +213,12 @@ export default function RegistroIncidentePage() {
             <CardContent className="p-6 space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="descripcion">Descripción del Incidente *</Label>
-                <Textarea id="descripcion" required placeholder="Ej: Accidente de tránsito, paciente inconsciente..." className="min-h-[120px] rounded-xl" value={formData.descripcion} onChange={(e) => setFormData({...formData, descripcion: e.target.value})} />
+                <Textarea id="descripcion" required placeholder="Ej: Accidente de tránsito, paciente inconsciente..." className="min-h-[120px] rounded-xl" value={formData.descripcion} onChange={(e) => setFormData({ ...formData, descripcion: e.target.value })} />
               </div>
               <div className="grid md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="tipo">Tipo de Emergencia *</Label>
-                  <Select required onValueChange={(val) => setFormData({...formData, tipo_emergencia: val})}>
+                  <Select required onValueChange={(val) => setFormData({ ...formData, tipo_emergencia: val })}>
                     <SelectTrigger className="rounded-xl"><SelectValue placeholder="Seleccione tipo" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="Trauma">Trauma</SelectItem>
@@ -206,7 +231,7 @@ export default function RegistroIncidentePage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="prioridad">Prioridad *</Label>
-                  <Select required onValueChange={(val) => setFormData({...formData, prioridad: val})}>
+                  <Select required onValueChange={(val) => setFormData({ ...formData, prioridad: val })}>
                     <SelectTrigger className="rounded-xl"><SelectValue placeholder="Seleccione prioridad" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="NORMAL" className="text-green-600 font-bold">NORMAL</SelectItem>
@@ -228,11 +253,11 @@ export default function RegistroIncidentePage() {
               <div className="grid md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="nombre">Nombre</Label>
-                  <Input id="nombre" placeholder="Nombre completo" className="rounded-xl" value={formData.nombre_paciente} onChange={(e) => setFormData({...formData, nombre_paciente: e.target.value})} />
+                  <Input id="nombre" placeholder="Nombre completo" className="rounded-xl" value={formData.nombre_paciente} onChange={(e) => setFormData({ ...formData, nombre_paciente: e.target.value })} />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="edad">Edad aprox.</Label>
-                  <Input id="edad" type="number" placeholder="Edad" className="rounded-xl" value={formData.edad_aproximada} onChange={(e) => setFormData({...formData, edad_aproximada: e.target.value})} />
+                  <Input id="edad" type="number" placeholder="Edad" className="rounded-xl" value={formData.edad_aproximada} onChange={(e) => setFormData({ ...formData, edad_aproximada: e.target.value })} />
                 </div>
               </div>
             </CardContent>
@@ -248,7 +273,7 @@ export default function RegistroIncidentePage() {
                   <Label htmlFor="direccion">Indique la Dirección Exacta *</Label>
                   <div className="relative">
                     <Home className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                    <Input id="direccion" required placeholder="Calle, Carrera, Barrio o Punto de referencia en Manizales" className="pl-10 h-11 rounded-xl" value={formData.direccion} onChange={(e) => { setFormData({...formData, direccion: e.target.value}); setCoords(null); }} />
+                    <Input id="direccion" required placeholder="Calle, Carrera, Barrio o Punto de referencia en Manizales" className="pl-10 h-11 rounded-xl" value={formData.direccion} onChange={(e) => { setFormData({ ...formData, direccion: e.target.value }); setCoords(null); }} />
                   </div>
                 </div>
                 <div className="flex items-center gap-2">

@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // ✅ CAMBIAR: table.search() → table.query()
+    // ✅ Obtener todos los registros
     const data = await table.query().limit(100).toArray();
 
     return NextResponse.json({
@@ -27,7 +27,6 @@ export async function GET(req: NextRequest) {
         gravedad: doc.gravedad,
         hospitalDestino: doc.hospitalDestino,
         fecha: doc.fecha,
-        // vector se omite porque es muy grande
       })),
       message: `Se encontraron ${data.length} documentos en LanceDB`
     });

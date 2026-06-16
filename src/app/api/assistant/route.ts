@@ -1,11 +1,10 @@
-import { llm } from "@/lib/ai/models";
+import { queryIncidents } from "@/lib/ai/rag";
+import { SearchFilters } from "@/lib/ai/vector-store";
 import { NextRequest, NextResponse } from "next/server";
-import { SystemMessage, HumanMessage } from "@langchain/core/messages";
-import { CODEBLUE_SYSTEM_PROMPT } from "@/lib/ai/system-prompt";
 
 export async function POST(req: NextRequest) {
   try {
-    const { question } = await req.json();
+    const { question, filters, similarityThreshold } = await req.json();
 
     if (!question) {
       return NextResponse.json(
@@ -14,24 +13,34 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // ✅ Crear mensajes con contexto del sistema
-    const messages = [
-      new SystemMessage(CODEBLUE_SYSTEM_PROMPT),
-      new HumanMessage(question),
-    ];
+    console.log(`\n📨 Nueva pregunta: "${question}"`);
+    if (filters) console.log("🔍 Filtros aplicados:", filters);
 
-    const response = await llm.invoke(messages);
+    // Ejecutar flujo RAG con filtros
+    const result = await queryIncidents(
+      question,
+      filters as SearchFilters,
+      similarityThreshold || 0.2
+    );
 
-    console.log("✅ Respuesta de Gemini:", response.content);
+    console.log(
+      `✅ Respuesta generada. Documentos usados: ${result.sourceDocuments.length}`
+    );
 
-    return NextResponse.json({
-      output: response.content,
-      sourceDocuments: [],
-    });
-  } catch (error: any) {
-    console.error("[API /api/assitant-simple] Error:", error);
     return NextResponse.json(
       {
+        success: true,
+        output: result.answer,
+        sourceDocuments: result.sourceDocuments,
+        documentsCount: result.sourceDocuments.length,
+      },
+      { status: 200 }
+    );
+  } catch (error: any) {
+    console.error("[API /api/assistant] Error:", error);
+    return NextResponse.json(
+      {
+        success: false,
         error: "Error en el servidor",
         details: error.message,
       },

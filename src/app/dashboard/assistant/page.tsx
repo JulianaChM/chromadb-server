@@ -6,7 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { SendHorizonal, AlertTriangle } from 'lucide-react';
-import ReactMarkdown from 'react-markdown'; 
+import { UploadDialog } from '@/components/documents/upload-dialog';
+import ReactMarkdown from 'react-markdown';
 
 interface Message {
   id: string;
@@ -99,8 +100,13 @@ export default function AssistantPage() {
     <div className="flex flex-col h-full">
       <Card className="flex-grow flex flex-col">
         <CardHeader>
-          <CardTitle>CodeBlueAI - Asistente de Emergencias</CardTitle>
-          <CardDescription>Consulta protocolos, analiza incidentes y obtén recomendaciones urgentes.</CardDescription>
+          <div className="flex items-center justify-between">
+            <div className="space-y-1 flex-1">
+              <CardTitle>CodeBlueAI - Asistente de Emergencias</CardTitle>
+              <CardDescription>Consulta protocolos, analiza incidentes y obtén recomendaciones urgentes.</CardDescription>
+            </div>
+            <UploadDialog />
+          </div>
         </CardHeader>
         <CardContent className="flex-grow overflow-y-auto p-4 space-y-4">
           {messages.map((msg) => (
