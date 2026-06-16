@@ -111,11 +111,15 @@ export default function RegistroIncidentePage() {
         lng: longitude
       };
 
-      await fetch('https://linita22-3.app.n8n.cloud/webhook-test/emergencias', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
+      try {
+        await fetch('https://linita22-3.app.n8n.cloud/webhook-test/emergencias', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+      } catch (webhookError) {
+        console.warn("Webhook n8n no disponible, pero el incidente se guardó en Firestore.");
+      }
 
       setStatus('success');
     } catch (error) {
