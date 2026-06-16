@@ -13,30 +13,40 @@ async function listVectors() {
   console.log(`🔍 Conectando a LanceDB en: ${dbPath}...`);
 
   try {
-    const db = await connect(dbPath);
-    const tableNames = await db.tableNames();
+    const dbConnection = await connect(dbPath);
+    const tableNames = await dbConnection.tableNames();
+
+    console.log('📋 Tablas detectadas:', tableNames);
 
     if (!tableNames.includes('incidentes_vectors')) {
-      console.log('❌ No se encontró la tabla "incidentes_vectors". Asegúrate de haber iniciado el bootstrap.');
+      console.log('\n❌ No se encontró la tabla "incidentes_vectors".');
+      console.log('💡 Para crearla, inicia la aplicación (npm run dev) y navega a la página principal');
+      console.log('   esto disparará el proceso initializeApp() en src/app/layout.tsx.');
       return;
     }
 
-    const table = await db.openTable('incidentes_vectors');
+    const table = await dbConnection.openTable('incidentes_vectors');
+    const count = await table.countRows();
+    console.log(`\n📈 Total de registros en la tabla: ${count}`);
+
     // Obtenemos los registros (limitado a 50 para la consola)
     const results = await table.query().limit(50).toArray();
 
     if (results.length === 0) {
-      console.log('⚠️ La tabla está vacía.');
+      console.log('⚠️ La tabla existe pero está vacía.');
     } else {
-      console.log(`✅ Se encontraron ${results.length} registros en la tabla "incidentes_vectors":`);
+      console.log(`\n✅ Mostrando primeros ${results.length} registros:`);
       results.forEach((row, i) => {
+        // En LanceDB 1.x con LangChain, el texto suele estar en la columna 'text'
         console.log(`\n[${i + 1}] ID: ${row.id}`);
         console.log(`    Contenido: ${row.text?.substring(0, 150)}...`);
-        console.log(`    Metadata:`, row.metadata);
+        // La metadata puede venir como string JSON o como objeto dependiendo de la inserción
+        const meta = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
+        console.log(`    Metadata:`, meta);
       });
     }
   } catch (error) {
-    console.error('❌ Error al listar vectores:', error);
+    console.error('\n❌ Error al intentar listar los vectores:', error);
   }
 }
 

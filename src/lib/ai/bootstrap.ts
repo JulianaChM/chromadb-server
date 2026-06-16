@@ -15,29 +15,41 @@ export async function bootstrapIncidentEmbeddings() {
     const dbPath = process.env.LANCEDB_PATH || "lancedb.db";
     const connection = await connect(dbPath);
     
-    // Abrir o crear la tabla de forma segura
-    let table;
     const tableNames = await connection.tableNames();
+    console.log("ℹ️ Tablas encontradas en LanceDB:", tableNames);
+
+    let table;
     if (tableNames.includes('incidentes_vectors')) {
       table = await connection.openTable('incidentes_vectors');
+      console.log("✅ Tabla 'incidentes_vectors' abierta.");
     } else {
+      console.log("🆕 Creando tabla 'incidentes_vectors'...");
       table = await connection.createTable('incidentes_vectors', [
-        { vector: Array(768).fill(0), text: 'init', id: '0', metadata: {} }
+        { 
+          vector: Array(768).fill(0), 
+          text: 'initialization_node', 
+          id: '0', 
+          metadata: JSON.stringify({ type: 'init' }) 
+        }
       ]);
+      console.log("✅ Tabla 'incidentes_vectors' creada.");
     }
 
     const vectorStore = new LanceDB(embeddings, { table });
     
-    console.log("ℹ️ Verificando incidentes en Firestore...");
-    // Usamos any para evitar errores de tipado entre SDKs de Firebase en el entorno de build
-    const incidentsSnapshot = await (db as any).collection('incidentes').get();
+    console.log("ℹ️ Consultando incidentes en Firestore...");
+    // Intentamos obtener los incidentes. 
+    // Nota: 'db' es la instancia de Firebase Admin
+    const incidentsSnapshot = await db.collection('incidentes').get();
 
     if (incidentsSnapshot.empty) {
-      console.log("🟡 No se encontraron incidentes en Firestore.");
+      console.log("🟡 No se encontraron incidentes en Firestore para indexar.");
       return;
     }
 
-    const documents = incidentsSnapshot.docs.map((doc: any) => {
+    console.log(`📊 Encontrados ${incidentsSnapshot.size} incidentes. Generando embeddings...`);
+
+    const documents = incidentsSnapshot.docs.map((doc) => {
       const data = doc.data();
       const representativeText = `
         Tipo: ${data.tipo_emergencia || data.tipo || 'N/A'},
@@ -50,7 +62,7 @@ export async function bootstrapIncidentEmbeddings() {
       return {
         pageContent: representativeText,
         metadata: {
-          docId: doc.id, // Usamos docId para evitar conflictos con la propiedad id de LanceDB
+          docId: doc.id,
           tipo: data.tipo_emergencia || data.tipo || '',
           gravedad: data.prioridad || '',
           fecha: data.createdAt && typeof data.createdAt.toDate === 'function' 
@@ -63,9 +75,9 @@ export async function bootstrapIncidentEmbeddings() {
     // Agregamos los documentos al almacén de vectores
     await vectorStore.addDocuments(documents);
 
-    console.log(`✅ Se han procesado ${documents.length} incidentes hacia el almacén de vectores.`);
+    console.log(`✅ Sincronización completada: ${documents.length} incidentes vectorizados.`);
 
   } catch (error) {
-    console.error("❌ Error durante el proceso de bootstrap de embeddings de incidentes:", error);
+    console.error("❌ Error durante el proceso de bootstrap de embeddings:", error);
   }
 }
