@@ -1,87 +1,92 @@
 // src/lib/ai/bootstrap.ts
-import { Document } from "@langchain/core/documents";
-import { vectorStore } from "./vector-store";
-import { db } from "../firebase";
-import { ChromaClient } from "chromadb";
+import { connect } from 'lancedb';
+import { GoogleGenerativeAIEmbeddings } from "@langchain/google-genai";
+import { LanceDB } from "@langchain/community/vectorstores/lancedb";
+import { db } from '../../firebase'; // Assuming firebase is initialized here
 
-async function loadIncidentsFromFirestore() {
-  console.log("Cargando incidentes desde Firestore...");
-  const incidentsSnapshot = await db.collection('incidents').get();
-  
-  if (incidentsSnapshot.empty) {
-    console.log("No se encontraron incidentes en Firestore.");
-    return [];
-  }
-
-  const incidents = incidentsSnapshot.docs.map(doc => {
-    const data = doc.data();
-    const pageContent = `Tipo de incidente: ${data.type}. Ubicación: ${data.location}. Descripción: ${data.description}. Fecha: ${data.timestamp?.toDate()?.toLocaleString() ?? 'No especificada'}. Ambulancia asignada: ${data.assignedAmbulance ?? 'Ninguna'}. Hospital asignado: ${data.assignedHospital ?? 'Ninguno'}. Estado: ${data.status}.`;
-    
-    const metadata = {
-        id: doc.id,
-        ...data
-    };
-
-    return new Document({ pageContent, metadata });
-  });
-
-  console.log(`Se cargaron ${incidents.length} incidentes de Firestore.`);
-  return incidents;
+interface Incident {
+  id: string;
+  ambulancia_id: string;
+  ambulancia_placa: string;
+  creado_en: { toDate: () => Date };
+  descripcion: string;
+  edad_aproximada: number;
+  estado: string;
+  finalizado_at: string;
+  hospital_id: string;
+  lat: number;
+  lng: number;
+  nombre_paciente: string;
+  prioridad: string;
+  tipo: string;
 }
 
-let initialized = false;
+const embeddings = new GoogleGenerativeAIEmbeddings({
+  model: "embedding-001",
+});
 
-export async function initializeVectorStore() {
-  if (initialized) {
-    return;
-  }
-  initialized = true;
+async function getVectorStore() {
+  const db = await connect('lancedb');
+  // Try to create the table if it doesn't exist.
+  // This is more robust than just opening.
+  const table = await db.createTable('incidentes_vectors', [{ vector: [], text: 'string', id: 'string' }], { writeMode: 'overwrite' });
+  return new LanceDB(embeddings, { table });
+}
 
-  console.log("🔍 Verificando estado de la base de datos de vectores (ChromaDB)...");
+export async function bootstrapIncidentEmbeddings() {
+  console.log("🚀 Iniciando proceso de bootstrap para embeddings de incidentes...");
 
   try {
-    // Acceder al cliente de ChromaDB directamente
-    const chromaClient = new ChromaClient({
-      path: process.env.CHROMA_URL?.replace(/\/$/, "")
-    });
+    const vectorStore = await getVectorStore();
+    const table = vectorStore.table;
+    const table_size = await table.countRows();
 
-    const collection = await chromaClient.getOrCreateCollection({
-      name: "incidentes"
-    });
-    
-    const count = await collection.count();
-
-    console.log(`📊 Total de documentos en ChromaDB: ${count}`);
-
-    if (count > 0) {
-      console.log("✅ La colección 'incidentes' ya tiene documentos.\n");
-      
-      // IMPRIME EL CONTENIDO DE CHROMADB
-      try {
-        const allData = await collection.get();
-        console.log("📋 === CONTENIDO DE CHROMADB ===");
-        console.log(JSON.stringify(allData, null, 2));
-        console.log("=== FIN DEL CONTENIDO ===\n");
-      } catch (err) {
-        console.log("⚠️ No se pudo obtener el contenido detallado de ChromaDB:", err);
-      }
-      
+    if (table_size > 0) {
+      console.log("✅ La tabla de vectores de incidentes ya contiene datos. No se requiere acción.");
       return;
     }
 
-    console.log("⚠️ La colección 'incidentes' está vacía. Poblando desde Firestore...");
+    console.log("ℹ️ La tabla de vectores de incidentes está vacía. Poblando desde Firestore...");
 
-    const incidentsAsDocuments = await loadIncidentsFromFirestore();
+    const incidentsSnapshot = await db.collection('incidentes').get();
 
-    if (incidentsAsDocuments.length > 0) {
-      console.log("🔄 Creando embeddings y almacenando en ChromaDB...");
-      await vectorStore.addDocuments(incidentsAsDocuments);
-      console.log("✨ Población de ChromaDB completada exitosamente.");
-    } else {
-      console.log("❌ No hay incidentes en Firestore para agregar a ChromaDB.");
+    if (incidentsSnapshot.empty) {
+      console.log("🟡 No se encontraron incidentes en Firestore.");
+      return;
     }
-  } catch (error: any) {
-    console.error("❌ Error durante la inicialización del Vector Store:", error.message);
-    initialized = false; 
+
+    const incidents: any[] = [];
+    incidentsSnapshot.forEach(doc => {
+      const data = doc.data() as Incident;
+      incidents.push({ id: doc.id, ...data });
+    });
+
+    const documents = incidents.map(incident => {
+      const representativeText = `
+        Tipo: ${incident.tipo},
+        Prioridad: ${incident.prioridad},
+        Descripción: ${incident.descripcion},
+        Estado: ${incident.estado},
+        Paciente: ${incident.nombre_paciente},
+        Edad: ${incident.edad_aproximada}
+      `;
+      return {
+        pageContent: representativeText,
+        metadata: {
+          id: incident.id,
+          tipo: incident.tipo,
+          gravedad: incident.prioridad, // Assuming prioridad is gravity
+          hospitalDestino: incident.hospital_id,
+          fecha: incident.creado_en.toDate().toISOString(),
+        }
+      };
+    });
+
+    await vectorStore.addDocuments(documents);
+
+    console.log(`✅ Se han insertado ${documents.length} incidentes en LanceDB.`);
+
+  } catch (error) {
+    console.error("❌ Error durante el proceso de bootstrap de embeddings de incidentes:", error);
   }
 }
