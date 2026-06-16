@@ -1,80 +1,66 @@
-// src/lib/ai/bootstrap.ts
+
 import { connect } from '@lancedb/lancedb';
 import { GoogleGenerativeAIEmbeddings } from "@langchain/google-genai";
 import { LanceDB } from "@langchain/community/vectorstores/lancedb";
 import { db } from '@/lib/firebase';
 
-interface IncidentData {
-  ambulancia_id?: string;
-  ambulancia_placa?: string;
-  creado_en?: { toDate: () => Date };
-  descripcion?: string;
-  edad_aproximada?: number;
-  estado?: string;
-  finalizado_at?: string;
-  hospital_id?: string;
-  lat?: number;
-  lng?: number;
-  nombre_paciente?: string;
-  prioridad?: string;
-  tipo?: string;
-}
-
 const embeddings = new GoogleGenerativeAIEmbeddings({
   model: "embedding-001",
 });
-
-async function getVectorStore() {
-  const connection = await connect('lancedb.db');
-  // Creamos o abrimos la tabla directamente
-  const table = await connection.createTable(
-    'incidentes_vectors', 
-    [{ vector: Array(768).fill(0), text: 'string', id: 'string' }], 
-    { writeMode: 'overwrite' }
-  );
-  return new LanceDB(embeddings, { table });
-}
 
 export async function bootstrapIncidentEmbeddings() {
   console.log("🚀 Iniciando proceso de bootstrap para embeddings de incidentes...");
 
   try {
-    const vectorStore = await getVectorStore();
-    // Accedemos a la cuenta de filas de forma segura a través de los métodos públicos si estuvieran disponibles, 
-    // o simplemente intentamos poblar si es necesario.
+    const dbPath = process.env.LANCEDB_PATH || "lancedb.db";
+    const connection = await connect(dbPath);
+    
+    // Abrir o crear la tabla de forma segura
+    let table;
+    const tableNames = await connection.tableNames();
+    if (tableNames.includes('incidentes_vectors')) {
+      table = await connection.openTable('incidentes_vectors');
+    } else {
+      table = await connection.createTable('incidentes_vectors', [
+        { vector: Array(768).fill(0), text: 'init', id: '0', metadata: {} }
+      ]);
+    }
+
+    const vectorStore = new LanceDB(embeddings, { table });
     
     console.log("ℹ️ Verificando incidentes en Firestore...");
-
-    const incidentsSnapshot = await db.collection('incidentes').get();
+    // Usamos any para evitar errores de tipado entre SDKs de Firebase en el entorno de build
+    const incidentsSnapshot = await (db as any).collection('incidentes').get();
 
     if (incidentsSnapshot.empty) {
       console.log("🟡 No se encontraron incidentes en Firestore.");
       return;
     }
 
-    const documents = incidentsSnapshot.docs.map(doc => {
-      const data = doc.data() as IncidentData;
+    const documents = incidentsSnapshot.docs.map((doc: any) => {
+      const data = doc.data();
       const representativeText = `
-        Tipo: ${data.tipo || 'N/A'},
+        Tipo: ${data.tipo_emergencia || data.tipo || 'N/A'},
         Prioridad: ${data.prioridad || 'N/A'},
         Descripción: ${data.descripcion || 'Sin descripción'},
         Estado: ${data.estado || 'N/A'},
-        Paciente: ${data.nombre_paciente || 'Anónimo'},
-        Edad: ${data.edad_aproximada || 'N/A'}
+        Paciente: ${data.nombre_paciente || 'Anónimo'}
       `;
       
       return {
         pageContent: representativeText,
         metadata: {
-          id: doc.id,
-          tipo: data.tipo || '',
+          docId: doc.id, // Usamos docId para evitar conflictos con la propiedad id de LanceDB
+          tipo: data.tipo_emergencia || data.tipo || '',
           gravedad: data.prioridad || '',
-          hospitalDestino: data.hospital_id || '',
-          fecha: data.creado_en ? data.creado_en.toDate().toISOString() : new Date().toISOString(),
+          fecha: data.createdAt && typeof data.createdAt.toDate === 'function' 
+            ? data.createdAt.toDate().toISOString() 
+            : (data.createdAt || new Date().toISOString()),
         }
       };
     });
 
+    // Agregamos los documentos al almacén de vectores
     await vectorStore.addDocuments(documents);
 
     console.log(`✅ Se han procesado ${documents.length} incidentes hacia el almacén de vectores.`);

@@ -1,21 +1,28 @@
+
 import { LanceDB } from "@langchain/community/vectorstores/lancedb";
 import { embeddings } from "./models";
-import { connect, Connection } from "@lancedb/lancedb";
+import { connect } from "@lancedb/lancedb";
 
 const dbPath = process.env.LANCEDB_PATH || "lancedb.db";
 
 let vectorStore: LanceDB;
 
 async function initializeVectorStore() {
-    const db: Connection = await connect(dbPath);
+    const connection = await connect(dbPath);
     
     let table;
     try {
-        table = await db.openTable("incidentes_vectors");
+        const tableNames = await connection.tableNames();
+        if (tableNames.includes("incidentes_vectors")) {
+            table = await connection.openTable("incidentes_vectors");
+        } else {
+            table = await connection.createTable("incidentes_vectors", [
+                { vector: Array(768).fill(0), text: "init", id: "0", metadata: {} }
+            ]);
+        }
     } catch (e) {
-        table = await db.createTable("incidentes_vectors", [
-            { vector: Array(768).fill(0), text: "init", id: "0" }
-        ]);
+        console.error("Error al abrir/crear tabla en LanceDB:", e);
+        throw e;
     }
     
     vectorStore = new LanceDB(embeddings, { table });
