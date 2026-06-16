@@ -12,7 +12,7 @@ export const llm = new ChatGoogleGenerativeAI({
 
 export const embeddings = new GoogleGenerativeAIEmbeddings({
     apiKey: API_KEY,
-    model: "gemini-embedding-001",
+    model: "text-embedding-004",
 });
 
 export function checkApiKey() {
