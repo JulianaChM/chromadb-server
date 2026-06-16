@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState } from 'react';
@@ -19,6 +20,13 @@ export default function EmergenciesPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
 
+  const sendMessageToN8n = async (title: string, data: any) => {
+      // Simulación de envío a webhook
+      console.log(`[SIM] Enviando a n8n: ${title}`, data);
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      return { ok: true };
+  };
+
   const handleCreateEmergency = async () => {
     setIsProcessing(true);
     try {
@@ -28,6 +36,8 @@ export default function EmergenciesPage() {
         title: "Emergencia Registrada",
         description: "n8n ha procesado el incidente y el algoritmo A* está calculando la ruta.",
       });
+    } catch (error) {
+        console.error("Error al crear emergencia:", error);
     } finally {
       setIsProcessing(false);
     }
