@@ -1,8 +1,6 @@
 
 import { ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings } from "@langchain/google-genai";
 
-// Usamos modelos estándar conocidos para evitar errores durante el arranque del servidor.
-// Si la API KEY no está configurada, el servidor no colapsará al importar el módulo.
 const API_KEY = process.env.GEMINI_API_KEY || "AIzaSy_dummy_key_to_prevent_startup_crash";
 
 export const llm = new ChatGoogleGenerativeAI({

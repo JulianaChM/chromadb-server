@@ -39,15 +39,15 @@ export async function bootstrapIncidentEmbeddings() {
 
     const vectorStore = new LanceDB(embeddings, { table });
     
-    // Intentamos obtener los incidentes.
-    const incidentsSnapshot = await db.collection('incidentes').limit(50).get();
+    // Usamos el SDK de Admin que tiene .collection()
+    const incidentsSnapshot = await (db as any).collection('incidentes').limit(50).get();
 
     if (incidentsSnapshot.empty) {
       console.log("🟡 No se encontraron incidentes en Firestore para indexar.");
       return;
     }
 
-    const documents = incidentsSnapshot.docs.map((doc) => {
+    const documents = incidentsSnapshot.docs.map((doc: any) => {
       const data = doc.data();
       const representativeText = `
         Tipo: ${data.tipo_emergencia || data.tipo || 'N/A'},
