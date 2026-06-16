@@ -13,7 +13,6 @@ import { db, useCollection } from '@/firebase';
 import { collection, doc, updateDoc, increment } from 'firebase/firestore';
 import { findBestDispatchAStar } from '@/lib/a-star';
 import { findBestDispatchBFS } from '@/lib/bfs';
-import { sendIncidenciaToN8n } from '@/lib/n8n-webhook';
 
 // Importación dinámica de Leaflet para evitar errores de SSR
 const MapContainer = dynamic(() => import('react-leaflet').then((mod) => mod.MapContainer), { ssr: false });
@@ -212,21 +211,6 @@ export default function DispatchMapPage() {
         ambulancia_placa: bestUnit.ambulance.placa
       });
 
-      // Enviar actualización a n8n (no esperar respuesta para no ralentizar)
-      sendIncidenciaToN8n({
-        tipo: 'ACTUALIZAR',
-        estado: 'EN_RUTA',
-        incidente_id: incidentId,
-        descripcion: currentIncident.descripcion || '',
-        prioridad: currentIncident.prioridad || '',
-        ambulancia_placa: bestUnit.ambulance.placa || '',
-        nombre_paciente: currentIncident.nombre_paciente || '',
-        lat: currentIncident.lat,
-        lng: currentIncident.lng,
-        hospital_nombre: hospitalDestino.nombre || '',
-        creado_en: currentIncident.creado_en || new Date().toISOString()
-      }).catch(err => console.error('[n8n] Error en FASE 1:', err));
-
       // Animación al incidente
       await runAnimation(initialRoute, 50);
 
@@ -238,21 +222,6 @@ export default function DispatchMapPage() {
         lat: incidentCoords[0],
         lng: incidentCoords[1]
       });
-
-      // Enviar actualización a n8n (no esperar respuesta para no ralentizar)
-      sendIncidenciaToN8n({
-        tipo: 'ACTUALIZAR',
-        estado: 'EN_PROCESO',
-        incidente_id: incidentId,
-        descripcion: currentIncident.descripcion || '',
-        prioridad: currentIncident.prioridad || '',
-        ambulancia_placa: bestUnit.ambulance.placa || '',
-        nombre_paciente: currentIncident.nombre_paciente || '',
-        lat: currentIncident.lat,
-        lng: currentIncident.lng,
-        hospital_nombre: hospitalDestino.nombre || '',
-        creado_en: currentIncident.creado_en || new Date().toISOString()
-      }).catch(err => console.error('[n8n] Error en FASE 2:', err));
 
       if (hospitalDestino) {
         console.log(`[SIM] Trasladando al Hospital Óptimo (A*): ${hospitalDestino.nombre}.`);
@@ -286,22 +255,6 @@ export default function DispatchMapPage() {
             lng: hospitalDestino.lng,
             hospital_id: hospitalDestino.id
           });
-
-          // Enviar actualización a n8n (no esperar respuesta para no ralentizar)
-          // Nota: COMPLETADO se envía como TERMINADO hacia n8n
-          sendIncidenciaToN8n({
-            tipo: 'ACTUALIZAR',
-            estado: 'TERMINADO',
-            incidente_id: incidentId,
-            descripcion: currentIncident.descripcion || '',
-            prioridad: currentIncident.prioridad || '',
-            ambulancia_placa: bestUnit.ambulance.placa || '',
-            nombre_paciente: currentIncident.nombre_paciente || '',
-            lat: currentIncident.lat,
-            lng: currentIncident.lng,
-            hospital_nombre: hospitalDestino.nombre || '',
-            creado_en: currentIncident.creado_en || new Date().toISOString()
-          }).catch(err => console.error('[n8n] Error en FASE 3:', err));
         }
       }
 
