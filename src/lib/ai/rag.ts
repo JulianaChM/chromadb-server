@@ -21,7 +21,7 @@ export interface RAGResponse {
 export async function queryIncidents(
   question: string,
   filters?: SearchFilters,
-  similarityThreshold: number = 0.7
+  similarityThreshold: number = 0.2
 ): Promise<RAGResponse> {
   try {
     console.log("🚀 Iniciando flujo RAG...");

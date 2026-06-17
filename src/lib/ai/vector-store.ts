@@ -135,7 +135,7 @@ async function loadIncidentsToVectorStore(incidents: any[]): Promise<void> {
     }
 }
 
-// ✅ EXPORTAR FUNCIÓN DE SINCRONIZACIÓN
+// EXPORTAR FUNCIÓN DE SINCRONIZACIÓN
 export async function syncIncidentsToVectorStore(): Promise<{ success: boolean; count: number; message: string }> {
     if (syncInProgress) {
         return { success: false, count: 0, message: "⏳ Sincronización ya en progreso" };
@@ -439,7 +439,7 @@ export async function searchKnowledge(
 export async function searchKnowledgeWithFilters(
     query: string,
     filters?: SearchFilters,
-    similarityThreshold: number = 0.4
+    similarityThreshold: number = 0.2
 ): Promise<any[]> {
     try {
         console.log(`🔍 Búsqueda: "${query}" con similitud >= ${(similarityThreshold * 100).toFixed(0)}%`);
@@ -449,11 +449,26 @@ export async function searchKnowledgeWithFilters(
 
         console.log(`📊 Raw results from LanceDB: ${results.length}`);
 
+        // 🔍 DEBUG: Ver la estructura del primer resultado
+        if (results.length > 0) {
+            console.log(`🔍 DEBUG - Primer resultado (keys):`, Object.keys(results[0]));
+            console.log(`🔍 DEBUG - Metadata (keys):`, Object.keys(results[0].metadata || {}));
+            console.log(`🔍 DEBUG - _distance exists:`, results[0].metadata?._distance);
+            console.log(`🔍 DEBUG - Score exists:`, results[0].metadata?.score);
+            console.log(`🔍 DEBUG - Metadata completo:`, JSON.stringify(results[0].metadata, null, 2));
+            console.log(`🔍 DEBUG - pageContent:`, results[0].pageContent?.substring(0, 100));
+        }
+
         // Mapear y filtrar por similitud
         let formattedResults = results
-            .map((doc: any) => {
-                const distance = doc.metadata?._distance ?? 1;
-                const similarity = 1 - distance;
+            .map((doc: any, idx: number) => {
+                const distance = doc.metadata?._distance ?? doc.metadata?.score ?? 1;
+                const similarity = 1 / (1 + distance);
+
+                // 🔍 DEBUG: Log de cada similarity (primeros 5)
+                if (idx < 5) {
+                    console.log(`🔍 DEBUG [${idx}] - distance: ${distance}, similarity: ${similarity}, relevanceScore: ${(similarity * 100).toFixed(1)}%`);
+                }
 
                 return {
                     id: doc.metadata?.id || "sin-id",
